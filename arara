@@ -121,7 +121,7 @@ local ArurHubCosmetics = {
 -- Globally suppress all notifications during UI creation & auto-load
 if getgenv then getgenv().ArurHub_SuppressNotifs = true end
 
-local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/arurcoin1-cell/NewUI/main/Source"))()
+local library = loadstring(readfile("Millenial_UI.lua"))()
 -- [ FIX FOR INTERNAL LIBRARY ERRORS ] --
 -- If the library's internal code refers to a global 'library' variable, ensure it exists.
 if getgenv().library and not _G.library then _G.library = getgenv().library end
@@ -3473,12 +3473,12 @@ _G.ArurHubBreachSuccess = false
 -- [ FAST GC SCANNER ] --
 local function performFastGC()
     for _, v in pairs(getgc(true)) do
-        if typeof(v) == "function" and islclosure(v) then
+        if typeof(v) == "function" then
             local success, consts = pcall(debug.getconstants, v)
             if success and consts and table.find(consts, "FireServer") then
                 local upvals = debug.getupvalues(v)
                 for _, up in pairs(upvals) do
-                    if typeof(up) == "table" and #up == 6 and typeof(up[1]) == "string" and up[1]:match("[XYZ][12]") then
+                    if typeof(up) == "table" and #up >= 6 and typeof(up[1]) == "string" and up[1]:match("[XYZ][12]") then
                         _G.ArurHubMapping = up
                         for _, sc in pairs(upvals) do
                             if typeof(sc) == "string" and #sc > 3 and not sc:find("Server") then
