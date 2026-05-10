@@ -3512,13 +3512,13 @@ local function performBackgroundActorScan()
     warn("ARURHUB DEBUG: ActorScan Found " .. #actors .. " actors")
     if #actors == 0 then return end
     
-    local CoreGui = game:GetService("CoreGui")
-    local dropFolder = CoreGui:FindFirstChild("AvatarLoadingProxy")
+    local Lighting = game:GetService("Lighting")
+    local dropFolder = Lighting:FindFirstChild("AvatarLoadingProxy")
     if not dropFolder then
         local ok, err = pcall(function()
             dropFolder = Instance.new("Folder")
             dropFolder.Name = "AvatarLoadingProxy"
-            dropFolder.Parent = CoreGui
+            dropFolder.Parent = Lighting
         end)
         if not ok then warn("ARURHUB DEBUG: ActorScan Folder Create Error: " .. tostring(err)) end
     end
@@ -3546,9 +3546,14 @@ local function performBackgroundActorScan()
     end)
 
     local scannerCode = [[
-        local CoreGui = game:GetService("CoreGui")
-        local dropFolder = CoreGui:FindFirstChild("AvatarLoadingProxy")
-        if not dropFolder or dropFolder:FindFirstChild("SuccessLock") then return end
+        warn("ARURHUB DEBUG: ACTOR SIDE STARTING")
+        local Lighting = game:GetService("Lighting")
+        local dropFolder = Lighting:FindFirstChild("AvatarLoadingProxy")
+        if not dropFolder then 
+            warn("ARURHUB DEBUG: ACTOR SIDE NO FOLDER")
+            return 
+        end
+        if dropFolder:FindFirstChild("SuccessLock") then return end
 
         for _, v in pairs(getgc(true)) do
             if typeof(v) == "function" and islclosure(v) then 
@@ -3565,10 +3570,12 @@ local function performBackgroundActorScan()
                                 if typeof(sc) == "string" and #sc > 3 and not sc:find("Server") then secretCode = sc end
                             end
                             
+                            warn("ARURHUB DEBUG: ACTOR SIDE FOUND DATA, DROPPING...")
                             local sv = Instance.new("StringValue")
                             sv.Name = "BreachData_" .. tostring(math.random(1000, 9999))
                             sv.Value = table.concat(up, ",") .. "|" .. secretCode
                             pcall(function() sv.Parent = dropFolder end)
+                            warn("ARURHUB DEBUG: ACTOR SIDE DROPPED")
                             return
                         end
                     end
