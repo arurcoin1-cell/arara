@@ -1,198 +1,153 @@
-print("=== ARHURHUB BREACH METHOD TESTER ===")
-print("Testing all 3 alternative breach methods on this executor...")
-print("")
+-- hookmetamethod breach standalone test
+-- Run this, then shoot once in-game to calibrate
+print("=== hookmetamethod breach test ===")
 
 local lp = game:GetService("Players").LocalPlayer
-local playerGui = lp:FindFirstChild("PlayerGui")
 local rs = game:GetService("ReplicatedStorage")
+
+-- Find ShootingEvent
 local shootRemote = rs:FindFirstChild("Remotes") and rs.Remotes:FindFirstChild("ShootingEvent")
-
-print("[INFO] PlayerGui: " .. tostring(playerGui ~= nil))
-print("[INFO] ShootingEvent: " .. tostring(shootRemote ~= nil))
-print("")
-
--- Helper: check if a table looks like an XYZ mapping
-local function isXYZMapping(t)
-    return typeof(t) == "table" and #t == 6 and typeof(t[1]) == "string" and t[1]:match("[XYZ][12]")
+print("[1] ShootingEvent: " .. tostring(shootRemote ~= nil))
+if not shootRemote then
+    print("[ERR] ShootingEvent not found. Stopping.")
+    return
 end
 
--- Helper: scan a function's upvalues for the XYZ mapping
-local function scanUpvalues(fn, label)
-    local ok, upvals = pcall(debug.getupvalues, fn)
-    if not ok or type(upvals) ~= "table" then return false end
-    for i, up in pairs(upvals) do
-        if isXYZMapping(up) then
-            print("[FOUND] " .. label .. " upval[" .. i .. "] = " .. table.concat(up, ", "))
-            return true, up
-        end
-        -- also check nested tables
-        if typeof(up) == "table" then
-            for _, v in pairs(up) do
-                if isXYZMapping(v) then
-                    print("[FOUND] " .. label .. " nested in upval[" .. i .. "] = " .. table.concat(v, ", "))
-                    return true, v
+-- Check required functions
+print("[2] hookmetamethod: " .. type(hookmetamethod))
+print("[3] getrawmetatable: " .. type(getrawmetatable))
+print("[4] getnamecallmethod: " .. type(getnamecallmethod))
+print("[5] newcclosure: " .. type(newcclosure))
+
+local mt = getrawmetatable(game)
+print("[6] Got metatable: " .. tostring(mt ~= nil))
+
+-- Set up the hook
+print("[7] Setting up hook... Shoot once in-game!")
+
+local captured = false
+
+local ok, err = pcall(function()
+    setreadonly(mt, false)
+
+    local old__namecall = mt.__namecall
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+
+        -- Only intercept FireServer on our specific remote
+        if method == "FireServer" and self == shootRemote and not captured then
+            captured = true
+            print("")
+            print("=== SHOT INTERCEPTED! ===")
+
+            local args = {...}
+            print("[SHOT] Total args: " .. #args)
+
+            -- Print each arg
+            for i, arg in ipairs(args) do
+                local atype = typeof(arg)
+                if atype == "number" then
+                    print("[SHOT] arg[" .. i .. "] NUMBER = " .. tostring(arg))
+                elseif atype == "string" then
+                    print("[SHOT] arg[" .. i .. "] STRING = '" .. arg .. "'")
+                elseif atype == "table" then
+                    print("[SHOT] arg[" .. i .. "] TABLE len=" .. #arg)
+                    -- Try to decode each element as a buffer
+                    for j, elem in ipairs(arg) do
+                        local etype = typeof(elem)
+                        if etype == "buffer" then
+                            local decoded = buffer.tostring(elem)
+                            local num = tonumber(decoded)
+                            print("[SHOT]   [" .. j .. "] buffer -> '" .. decoded .. "' (num=" .. tostring(num) .. ")")
+                        else
+                            print("[SHOT]   [" .. j .. "] " .. etype .. " = " .. tostring(elem))
+                        end
+                    end
+                elseif atype == "buffer" then
+                    local decoded = buffer.tostring(arg)
+                    print("[SHOT] arg[" .. i .. "] BUFFER -> '" .. decoded .. "'")
+                else
+                    print("[SHOT] arg[" .. i .. "] " .. atype .. " = " .. tostring(arg))
                 end
             end
-        end
-    end
-    return false
-end
 
--- Helper: walk all protos of a function recursively
-local function walkProtos(fn, label, depth, visited)
-    depth = depth or 0
-    visited = visited or {}
-    if depth > 5 then return false end
-    if visited[fn] then return false end
-    visited[fn] = true
+            -- Try to decode the mapping
+            -- arg[1] = power, arg[2] = buffer table, arg[3] = code
+            local bufTable = nil
+            local codeStr = nil
+            local powerVal = nil
 
-    local found, mapping = scanUpvalues(fn, label .. "[d" .. depth .. "]")
-    if found then return true, mapping end
-
-    -- Try getproto
-    if not getproto then return false end
-    local ok, count = pcall(function()
-        local i = 0
-        while true do
-            local ok2, proto = pcall(getproto, fn, i, true)
-            if not ok2 or not proto then break end
-            if typeof(proto) == "function" then
-                local f, m = walkProtos(proto, label .. ".proto" .. i, depth + 1, visited)
-                if f then return true, m end
-            end
-            i = i + 1
-        end
-    end)
-    return false
-end
-
-------------------------------------------------------------------------
--- METHOD 1: getscriptclosure
-------------------------------------------------------------------------
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print("METHOD 1: getscriptclosure")
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-if not getscriptclosure then
-    print("[SKIP] getscriptclosure not available on this executor")
-else
-    print("[OK] getscriptclosure exists")
-    local found1 = false
-    if playerGui then
-        local scripts = playerGui:GetDescendants()
-        print("[INFO] Scanning " .. #scripts .. " PlayerGui descendants for LocalScripts...")
-        for _, obj in ipairs(scripts) do
-            if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                local ok, closure = pcall(getscriptclosure, obj)
-                if ok and typeof(closure) == "function" then
-                    -- Walk all protos of this script's main closure
-                    local found, mapping = walkProtos(closure, obj.Name)
-                    if found then
-                        print("[METHOD 1 SUCCESS] Found via: " .. obj:GetFullName())
-                        found1 = true
-                        break
+            for i, arg in ipairs(args) do
+                if typeof(arg) == "number" then
+                    powerVal = arg
+                elseif typeof(arg) == "string" and #arg > 3 then
+                    codeStr = arg
+                elseif typeof(arg) == "table" and #arg == 6 then
+                    -- check if it's a buffer table
+                    if typeof(arg[1]) == "buffer" then
+                        bufTable = arg
                     end
                 end
             end
-        end
-    end
-    if not found1 then
-        print("[METHOD 1 FAIL] No XYZ mapping found via getscriptclosure")
-    end
-end
 
-print("")
+            print("")
+            print("[DECODE] power=" .. tostring(powerVal))
+            print("[DECODE] code='" .. tostring(codeStr) .. "'")
+            print("[DECODE] bufTable found: " .. tostring(bufTable ~= nil))
 
-------------------------------------------------------------------------
--- METHOD 2: getconnections on ShootingEvent
-------------------------------------------------------------------------
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print("METHOD 2: getconnections on ShootingEvent")
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            if bufTable then
+                -- Decode all 6 values
+                local vals = {}
+                for i, buf in ipairs(bufTable) do
+                    vals[i] = tonumber(buffer.tostring(buf))
+                    print("[DECODE] buf[" .. i .. "] = " .. tostring(vals[i]))
+                end
 
-if not getconnections then
-    print("[SKIP] getconnections not available on this executor")
-elseif not shootRemote then
-    print("[SKIP] ShootingEvent remote not found")
-else
-    print("[OK] getconnections exists")
-    local ok, conns = pcall(getconnections, shootRemote.OnClientEvent)
-    print("[INFO] getconnections ok=" .. tostring(ok))
-    if ok and conns then
-        print("[INFO] Connection count: " .. #conns)
-        local found2 = false
-        for i, conn in ipairs(conns) do
-            print("[INFO] Connection " .. i .. " type=" .. typeof(conn))
-            local fn = conn.Function or (typeof(conn) == "function" and conn) or nil
-            if fn then
-                local found, mapping = walkProtos(fn, "conn" .. i)
-                if found then
-                    print("[METHOD 2 SUCCESS] Found via connection " .. i)
-                    found2 = true
-                    break
+                -- Get current player position to try to match
+                local char = lp.Character
+                local head = char and char:FindFirstChild("Head")
+                if head then
+                    local pos = head.Position
+                    print("")
+                    print("[DECODE] Player head pos: X=" .. pos.X .. " Y=" .. pos.Y .. " Z=" .. pos.Z)
+                    print("[DECODE] Trying to match values to XYZ components...")
+
+                    local labels = {}
+                    for i, val in ipairs(vals) do
+                        -- Compare to position components with some tolerance
+                        if math.abs(val - pos.X) < 2 then
+                            labels[i] = "X1(pos.X)"
+                        elseif math.abs(val - pos.Y) < 2 then
+                            labels[i] = "Y1(pos.Y)"
+                        elseif math.abs(val - pos.Z) < 2 then
+                            labels[i] = "Z1(pos.Z)"
+                        elseif val >= -1.1 and val <= 1.1 then
+                            labels[i] = "DIR_COMPONENT(X2/Y2/Z2)"
+                        else
+                            labels[i] = "UNKNOWN"
+                        end
+                        print("[DECODE] buf[" .. i .. "] = " .. tostring(val) .. " -> " .. labels[i])
+                    end
+                else
+                    print("[DECODE] Could not get head position for matching")
                 end
             end
+
+            print("")
+            print("=== CAPTURE COMPLETE - unhooking ===")
+            mt.__namecall = old__namecall
+            setreadonly(mt, true)
         end
-        if not found2 then
-            print("[METHOD 2 FAIL] No XYZ mapping found via getconnections")
-        end
-    else
-        print("[METHOD 2 FAIL] getconnections failed: " .. tostring(conns))
-    end
-end
 
-print("")
+        return old__namecall(self, ...)
+    end)
 
-------------------------------------------------------------------------
--- METHOD 3: hookmetamethod intercept (just tests if hook is possible)
-------------------------------------------------------------------------
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print("METHOD 3: hookmetamethod availability")
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    setreadonly(mt, true)
+end)
 
-if not hookmetamethod then
-    print("[SKIP] hookmetamethod not available on this executor")
+print("[8] Hook setup: ok=" .. tostring(ok) .. " err=" .. tostring(err))
+if ok then
+    print("[READY] Hook active! Shoot once in-game now.")
 else
-    print("[OK] hookmetamethod exists - one-shot calibration is possible")
-    print("[INFO] This would intercept the first real shot to grab mapping")
+    print("[FAILED] Could not set up hook.")
 end
-
-if not hookfunction then
-    print("[INFO] hookfunction: NOT available")
-else
-    print("[INFO] hookfunction: available")
-end
-
-if not newcclosure then
-    print("[INFO] newcclosure: NOT available")
-else
-    print("[INFO] newcclosure: available")
-end
-
-print("")
-
-------------------------------------------------------------------------
--- BONUS: getproto standalone check
-------------------------------------------------------------------------
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print("BONUS: Available debug tools on this executor")
-print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-local tools = {
-    "getgc", "getscriptclosure", "getconnections", "hookmetamethod",
-    "hookfunction", "newcclosure", "getproto", "getcallingscript",
-    "getloadedmodules", "getscripts", "debug.getinfo", "setreadonly",
-    "getrawmetatable", "getnamecallmethod"
-}
-for _, name in ipairs(tools) do
-    local val
-    if name:find("%.") then
-        local a, b = name:match("(.+)%.(.+)")
-        val = _G[a] and _G[a][b]
-    else
-        val = _G[name] or getfenv()[name]
-    end
-    print("[" .. (val ~= nil and "YES" or "NO ") .. "] " .. name)
-end
-
-print("")
-print("=== DONE ===")
