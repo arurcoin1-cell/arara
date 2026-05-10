@@ -3555,8 +3555,13 @@ local function performBackgroundActorScan()
         end
         if dropFolder:FindFirstChild("SuccessLock") then return end
 
-        for _, v in pairs(getgc(true)) do
-            if typeof(v) == "function" and islclosure(v) then 
+        local objects = getgc(true)
+        warn("ARURHUB DEBUG: ACTOR SIDE FOUND " .. #objects .. " GC OBJECTS")
+        
+        local foundFuncs = 0
+        for _, v in pairs(objects) do
+            if typeof(v) == "function" then 
+                foundFuncs = foundFuncs + 1
                 local success, consts = pcall(debug.getconstants, v)
                 if success and consts and table.find(consts, "FireServer") then
                     local upvals = debug.getupvalues(v)
@@ -3582,6 +3587,7 @@ local function performBackgroundActorScan()
                 end
             end
         end
+        warn("ARURHUB DEBUG: ACTOR SIDE SCANNED " .. foundFuncs .. " FUNCTIONS. NONE MATCHED.")
     ]]
 
     for i = 1, math.min(#actors, 5) do
