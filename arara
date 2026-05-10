@@ -121,7 +121,7 @@ local ArurHubCosmetics = {
 -- Globally suppress all notifications during UI creation & auto-load
 if getgenv then getgenv().ArurHub_SuppressNotifs = true end
 
-local library = loadstring(readfile("Millenial_UI.lua"))()
+local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/arurcoin1-cell/NewUI/main/Source"))()
 -- [ FIX FOR INTERNAL LIBRARY ERRORS ] --
 -- If the library's internal code refers to a global 'library' variable, ensure it exists.
 if getgenv().library and not _G.library then _G.library = getgenv().library end
