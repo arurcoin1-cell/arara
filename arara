@@ -1,83 +1,4519 @@
-print("=== ARURHUB PARALLEL MEMORY SCANNER ===")
+if not game:IsLoaded() then game.Loaded:Wait() end
+local game, workspace, task = game, workspace, task
+local math, string, table, debug = math, string, table, debug
+repeat task.wait() until game:GetService("Players").LocalPlayer and game:GetService("Players").LocalPlayer.Character and game:GetService("Players").LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 
-local actors = getactors()
-print("Found " .. #actors .. " actors.")
-if #actors == 0 then return end
+-- Global State Table (Fixes "Out of local registers" and Init Errors)
+local ArurHubData = {
+    AimbotEnabled = false,
+    NoJumpEnabled = false,
+    PassAimbotEnabled = false,
+    PassESPSize = 24,
+    PassESPColor = Color3.fromRGB(0, 255, 255),
+    PassPredictionStrength = 1.0,
+    MilleniumRoster = {},
+    AimbotMode = "Low Arc",
+    JumpWaitTime = 0.25,
+    RandomizeWait = false,
+    TeamGoalCheckEnabled = false,
+    TargetHUDScale = 1.0,
+    PersistentPassTargets = {},
+    PersistentTargetVelocities = {},
+    PassTargetBillboards = {},
+    
+    MagnetEnabled = false,
+    MaxMagnetDistance = 0,
+    ShotMagnetEnabled = false,
+    ShotMagMaxDistance = 0,
+    
+    ReachEnabled = false,
+    ReachDistance = 0,
+    
+    SpeedBypassEnabled = false,
+    SpeedGain = 0,
+    AntiTravelEnabled = false,
+    
+    AutoDunkEnabled = false,
+    AutoDunkDistance = 21.0,
+    
+    -- Visual & Cosmetic State
+    effectEnabled = false,
+    currentEffect = "Dragon Portal",
+    ballSkinEnabled = false,
+    currentBallSkin = "Standard",
+    bodyAuraEnabled = false,
+    currentBodyAura = "Standard",
+    ballAuraEnabled = false,
+    currentBallAura = "Standard",
+    ballTrailEnabled = false,
+    currentBallTrail = "Standard",
+    syncPerfectWithTrail = true,
+    useCustomPerfectResult = false,
+    perfectResultColor = Color3.fromRGB(0, 255, 255),
+    
+    -- Helper Logic
+    HasBball = false,
+    HoopDist = 0,
+    NearestHoop = nil,
+    DistRenderStr = "",
+    TargetHUDAccentColor = Color3.fromRGB(148, 143, 214),
+    TargetHUDDistanceColor = Color3.fromRGB(200, 200, 200),
+    TargetHUDDisplayName = false,
+    HideNotifications = false,
+    IsDunkingSpam = false,
+    LastAimbotShot = 0,
+    LastDunkTime = 0,
+    IsJumping = false,
+    BallTrailColor = Color3.fromRGB(255, 255, 255),
+    BallTrailColorMap = {},
+    
+    LockToPlayer = false,
+    LockedPlayer = nil,
+    PredictionOffset = 1.0,
+    
+    HideNotifications = true, -- suppressed during startup, re-enabled after load
 
--- Create a shared StringValue in ReplicatedStorage for communication
-local rs = game:GetService("ReplicatedStorage")
-local sharedVal = rs:FindFirstChild("AH_Mapping_Result")
-if not sharedVal then
-    sharedVal = Instance.new("StringValue")
-    sharedVal.Name = "AH_Mapping_Result"
-    sharedVal.Parent = rs
+    ShowRange = false,
+    OnlyShowWithAimbot = true,
+    RangeMode = "Outline",
+    InRangeColor = Color3.new(0, 1, 0),
+    OutRangeColor = Color3.new(1, 0, 0),
+    
+    TrajectoryEnabled = false,
+    OnlyShowTrajWithAimbot = true,
+    TrajectoryMode = "Line",
+    TrajectoryColor = Color3.fromRGB(0, 255, 0),
+    TrajectoryTransparency = 0,
+    TrajectoryStayDuration = 1.5,
+    TrajectoryStopAtHoop = true,
+
+    TargetHUDEnabled = false,
+    TargetHUDAccentColor = Color3.fromRGB(0, 170, 255),
+    TargetHUDDisplayName = false,
+    DesyncEnabled = false,
+    
+    sessionMade = 0,
+    sessionTotal = 0,
+    lastGameMade = 0,
+    lastGameTotal = 0,
+    SessionOnlyStats = true,
+    
+    lockAccum = 0,
+    FOLLOW_DIST = 1.5,
+    DEAD_ZONE = 1.0,
+    pRoot = nil,
+    pHum = nil,
+}
+
+local ArurHubCosmetics = {
+    EffectNames = {"Dragon Portal"},
+    BallNames = {},
+    BallNameMap = {},
+    BodyAuraNames = {},
+    BodyAuraNameMap = {},
+    BallAuraNames = {},
+    BallAuraNameMap = {},
+    BallTrailNames = {},
+    BallTrailNameMap = {},
+    BallTrailColorMap = {}
+}
+
+-- Globally suppress all notifications during UI creation & auto-load
+if getgenv then getgenv().ArurHub_SuppressNotifs = true end
+
+local library = loadstring(readfile("Millenial_UI.lua"))()
+-- [ FIX FOR INTERNAL LIBRARY ERRORS ] --
+-- If the library's internal code refers to a global 'library' variable, ensure it exists.
+if getgenv().library and not _G.library then _G.library = getgenv().library end
+if library and not _G.library then _G.library = library end
+
+-- Tween Fallback
+function ArurHubData.genericTween(self, object, properties, style, time)
+    local ts = game:GetService("TweenService")
+    local ti = TweenInfo.new(time or 0.5)
+    local t = ts:Create(object, ti, properties)
+    t:Play()
+    return t
 end
-sharedVal.Value = ""
 
--- Listen for the result from the actors
-sharedVal:GetPropertyChangedSignal("Value"):Connect(function()
-    local val = sharedVal.Value
-    if val ~= "" then
-        print("========================================")
-        print("🚀 MAPPING FOUND VIA PARALLEL GETGC!")
-        print("Result: " .. val)
-        print("========================================")
+if library and type(library) == "table" and not library.tween then library.tween = ArurHubData.genericTween end
+if getgenv().library and type(getgenv().library) == "table" and not getgenv().library.tween then getgenv().library.tween = ArurHubData.genericTween end
+if _G.library and type(_G.library) == "table" and not _G.library.tween then _G.library.tween = ArurHubData.genericTween end
+
+-- Services
+local players = game:GetService("Players")
+local run_service = game:GetService("RunService")
+local uis = game:GetService("UserInputService")
+local tween_service = game:GetService("TweenService")
+local replicated_storage = game:GetService("ReplicatedStorage")
+local vim = game:GetService("VirtualInputManager")
+local collection_service = game:GetService("CollectionService")
+
+-- Variables
+local lp = players.LocalPlayer
+local camera = workspace.CurrentCamera
+local mouse = lp:GetMouse()
+local playerGui = lp:WaitForChild("PlayerGui")
+local vs = camera.ViewportSize
+local platform = uis:GetPlatform()
+local isMobile = not (platform == Enum.Platform.Windows or platform == Enum.Platform.OSX or platform == Enum.Platform.Linux)
+
+-- Library Setup
+library.directory = "ArurHub"
+_G.flags = library.flags
+if not isfolder("ArurHub") then makefolder("ArurHub") end
+if not isfolder("ArurHub/configs") then makefolder("ArurHub/configs") end
+
+-- Main UI Container
+local arurHubGui = playerGui:FindFirstChild("ArurHubUI")
+if not arurHubGui then
+    arurHubGui = Instance.new("ScreenGui")
+    arurHubGui.Name = "ArurHubUI"
+    arurHubGui.ResetOnSpawn = false
+    arurHubGui.Parent = playerGui
+end
+
+-- Stats Tracking moved to ArurHubData
+
+-- Stats HUD Initialization
+local statsGui = Instance.new("ScreenGui", playerGui)
+statsGui.Name = "ArurHubStats"
+statsGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+statsGui.ResetOnSpawn = false
+statsGui.Enabled = false
+
+-- Mobile Scaling
+if isMobile or uis.TouchEnabled then
+    local uiScale = Instance.new("UIScale", statsGui)
+    uiScale.Scale = math.clamp(camera.ViewportSize.Y / 750, 0.5, 0.9) -- Dynamic scaling matching library
+end
+
+local ACCENT = Color3.fromRGB(148, 143, 214)
+local CARD_BG = Color3.fromRGB(15, 15, 19)
+local HEADER_BG = Color3.fromRGB(22, 22, 28)
+local BAR_BG = Color3.fromRGB(38, 38, 46)
+
+-- Main card
+local statsFrame = Instance.new("Frame", statsGui)
+statsFrame.Size = UDim2.fromOffset(220, 82)
+statsFrame.Position = UDim2.fromOffset(20, 200)
+statsFrame.BackgroundColor3 = CARD_BG
+statsFrame.BorderSizePixel = 0
+Instance.new("UICorner", statsFrame).CornerRadius = UDim.new(0, 12)
+local cardStroke = Instance.new("UIStroke", statsFrame)
+cardStroke.Color = Color3.fromRGB(40, 40, 52)
+cardStroke.Thickness = 1.5
+
+-- Header bar (drag handle)
+local statsDragHeader = Instance.new("Frame", statsFrame)
+statsDragHeader.Size = UDim2.new(1, 0, 0, 28)
+statsDragHeader.BackgroundColor3 = HEADER_BG
+statsDragHeader.BorderSizePixel = 0
+Instance.new("UICorner", statsDragHeader).CornerRadius = UDim.new(0, 12)
+
+-- Fix: square bottom corners of header
+local headerFix = Instance.new("Frame", statsDragHeader)
+headerFix.Size = UDim2.new(1, 0, 0.5, 0)
+headerFix.Position = UDim2.new(0, 0, 0.5, 0)
+headerFix.BackgroundColor3 = HEADER_BG
+headerFix.BorderSizePixel = 0
+
+-- Accent dot
+local accentDot = Instance.new("Frame", statsDragHeader)
+accentDot.Size = UDim2.fromOffset(6, 6)
+accentDot.Position = UDim2.new(0, 10, 0.5, -3)
+accentDot.BackgroundColor3 = ACCENT
+accentDot.BorderSizePixel = 0
+Instance.new("UICorner", accentDot).CornerRadius = UDim.new(1, 0)
+
+-- Title label
+local statsTitle = Instance.new("TextLabel", statsDragHeader)
+statsTitle.Text = "SHOOTING STATS"
+statsTitle.Position = UDim2.fromOffset(24, 0)
+statsTitle.Size = UDim2.new(1, -24, 1, 0)
+statsTitle.BackgroundTransparency = 1
+statsTitle.TextColor3 = Color3.fromRGB(150, 150, 165)
+statsTitle.Font = Enum.Font.GothamBold
+statsTitle.TextSize = 10
+statsTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+-- FG ratio (left, big)
+local statsLabel = Instance.new("TextLabel", statsFrame)
+statsLabel.Text = "0/0"
+statsLabel.Position = UDim2.fromOffset(12, 30)
+statsLabel.Size = UDim2.new(0.55, 0, 0, 28)
+statsLabel.BackgroundTransparency = 1
+statsLabel.TextColor3 = Color3.fromRGB(240, 240, 248)
+statsLabel.Font = Enum.Font.GothamBold
+statsLabel.TextSize = 22
+statsLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Percentage (right, accent colored)
+local pctLabel = Instance.new("TextLabel", statsFrame)
+pctLabel.Text = "0%"
+pctLabel.Position = UDim2.new(0.55, 0, 0, 30)
+pctLabel.Size = UDim2.new(0.45, -12, 0, 28)
+pctLabel.BackgroundTransparency = 1
+pctLabel.TextColor3 = ACCENT
+pctLabel.Font = Enum.Font.GothamBold
+pctLabel.TextSize = 22
+pctLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+-- Progress bar track
+local barTrack = Instance.new("Frame", statsFrame)
+barTrack.Size = UDim2.new(1, -24, 0, 4)
+barTrack.Position = UDim2.fromOffset(12, 68)
+barTrack.BackgroundColor3 = BAR_BG
+barTrack.BorderSizePixel = 0
+Instance.new("UICorner", barTrack).CornerRadius = UDim.new(1, 0)
+
+local fgBarFill = Instance.new("Frame", barTrack)
+fgBarFill.Size = UDim2.new(0, 0, 1, 0)
+fgBarFill.BackgroundColor3 = ACCENT
+fgBarFill.BorderSizePixel = 0
+Instance.new("UICorner", fgBarFill).CornerRadius = UDim.new(1, 0)
+
+-- Custom drag: fixes teleport by converting to pure offsets before dragging
+-- [ TOUCH SUPPORTED ] --
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    statsDragHeader.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            local abs = statsFrame.AbsolutePosition
+            statsFrame.Position = UDim2.fromOffset(abs.X, abs.Y)
+            dragStart = input.Position
+            startPos = statsFrame.Position
+        end
+    end)
+    uis.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            statsFrame.Position = UDim2.fromOffset(startPos.X.Offset + delta.X, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    uis.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+function ArurHubData.updateStatsUI()
+    local dMade = ArurHubData.SessionOnlyStats and ArurHubData.sessionMade or (ArurHubData.lastGameMade or 0)
+    local dTotal = ArurHubData.SessionOnlyStats and ArurHubData.sessionTotal or (ArurHubData.lastGameTotal or 0)
+    local percent = dTotal > 0 and math.floor((dMade / dTotal) * 100) or 0
+    
+    statsLabel.Text = string.format("%d/%d", dMade, dTotal)
+    pctLabel.Text = string.format("%d%%", percent)
+    tween_service:Create(fgBarFill, TweenInfo.new(0.4, Enum.EasingStyle.Quad), {Size = UDim2.new(percent/100, 0, 1, 0)}):Play()
+end
+
+-- Networking Hook: Intercept updates while the stats menu is closed
+local dEvent = replicated_storage.Remotes:FindFirstChild("dataEvent")
+if dEvent then
+    dEvent.OnClientEvent:Connect(function(action, category, key, value)
+        if action == "Update" and category == "Stats" then
+            local val = tonumber(value) or 0
+            if key == "FGMade" then
+                if ArurHubData.lastGameMade ~= nil and val > ArurHubData.lastGameMade then
+                    ArurHubData.sessionMade = ArurHubData.sessionMade + (val - ArurHubData.lastGameMade)
+                end
+                ArurHubData.lastGameMade = val
+                ArurHubData.updateStatsUI()
+            elseif key == "FGAttempt" then
+                if ArurHubData.lastGameTotal ~= nil and val > ArurHubData.lastGameTotal then
+                    ArurHubData.sessionTotal = ArurHubData.sessionTotal + (val - ArurHubData.lastGameTotal)
+                end
+                ArurHubData.lastGameTotal = val
+                ArurHubData.updateStatsUI()
+            end
+        end
+    end)
+end
+
+-- Initial Capture: Try to read currently stored stats immediately
+task.spawn(function()
+    local util = replicated_storage:FindFirstChild("Util")
+    local pdModule = util and util:FindFirstChild("PlayerData")
+    if pdModule then
+        local pd = require(pdModule)
+        if pd and pd.Get then
+            ArurHubData.lastGameMade = tonumber(pd.Get("Stats", "FGMade")) or 0
+            ArurHubData.lastGameTotal = tonumber(pd.Get("Stats", "FGAttempt")) or 0
+            ArurHubData.updateStatsUI()
+        end
     end
 end)
 
--- Inject getgc scanner into the actors
-local scanCode = [[
-    task.wait(0.5)
-    local rs = game:GetService("ReplicatedStorage")
-    local sharedVal = rs:FindFirstChild("AH_Mapping_Result")
-    if not sharedVal then return end
+-- State Variables (Visuals)
+local lastShotInfo = {time = 0, points = {}, mode = "Line", color = Color3.new(1,1,1), trans = 0}
+local dotPool = {}
+local dotParticleSets = {}
+local beamLayers = {}
+local attLayers = {}
+local NUM_BEAM_LAYERS = 3
+local NUM_PARTICLE_TYPES = 2
+local currentBeamStyle = "Plain"
+local traj_active = false
 
-    -- Helper to verify mapping
-    local function isMappingTable(t)
-        if type(t) ~= "table" then return false end
-        local count = 0
-        for k, v in pairs(t) do
-            count = count + 1
-            if count > 10 then return false end
+-- [ RANGE UI & HIGHLIGHT SETUP ] --
+local rangeLabel = Instance.new("TextLabel", arurHubGui)
+rangeLabel.Name = "RangeLabel"
+rangeLabel.Size = UDim2.new(0, 200, 0, 50)
+rangeLabel.Position = UDim2.new(0.5, 0, 0.9, 0)
+rangeLabel.AnchorPoint = Vector2.new(0.5, 1)
+rangeLabel.BackgroundTransparency = 1
+rangeLabel.TextColor3 = Color3.new(1, 1, 1)
+rangeLabel.Font = Enum.Font.GothamBold
+rangeLabel.TextStrokeTransparency = 0.5
+rangeLabel.TextSize = 24
+rangeLabel.Visible = false
+
+local highlight = Instance.new("Highlight")
+highlight.Name = "ArurRangeHighlight"
+highlight.FillTransparency = 0.6
+highlight.OutlineTransparency = 0
+highlight.Enabled = false
+
+task.spawn(function()
+    highlight.Parent = lp.Character or lp.CharacterAdded:Wait()
+    lp.CharacterAdded:Connect(function(c) highlight.Adornee = c; highlight.Parent = c end)
+end)
+
+-- [ TRAJECTORY POOLER ] --
+local traj_folder = Instance.new("Folder", workspace)
+traj_folder.Name = "ArurTrajectory"
+
+for i = 1, 31 do
+    local dot = Instance.new("Part", traj_folder)
+    dot.Name = "Dot" .. i
+    dot.Anchored = true
+    dot.CanCollide = false
+    dot.CanTouch = false
+    dot.CastShadow = false
+    dot.Size = Vector3.new(0.2, 0.2, 0.2)
+    dot.Shape = Enum.PartType.Ball
+    dot.Transparency = 1
+    dot.Material = Enum.Material.Neon
+    table.insert(dotPool, dot)
+    
+    local p_set = {}
+    for p = 1, NUM_PARTICLE_TYPES do
+        local pe = Instance.new("ParticleEmitter", dot)
+        pe.Enabled = false
+        pe.Rate = 0
+        table.insert(p_set, pe)
+    end
+    table.insert(dotParticleSets, p_set)
+end
+
+for layer = 1, NUM_BEAM_LAYERS do
+    beamLayers[layer] = {}
+    attLayers[layer] = {}
+    for i = 1, 30 do
+        local a1 = Instance.new("Attachment", traj_folder)
+        local a2 = Instance.new("Attachment", traj_folder)
+        local b = Instance.new("Beam", traj_folder)
+        b.Attachment0 = a1
+        b.Attachment1 = a2
+        b.Enabled = false
+        b.FaceCamera = true
+        table.insert(beamLayers[layer], b)
+        table.insert(attLayers[layer], {a1, a2})
+    end
+end
+
+-- [ BEAM STYLE PRESETS ] --
+local NS  = NumberSequence.new
+local NSK = NumberSequenceKeypoint.new
+local CS  = ColorSequence.new
+local CSK = ColorSequenceKeypoint.new
+local NR  = NumberRange.new
+
+local BEAM_STYLES = {
+    ["Plain"] = { beams = {}, particles = {} },
+
+    ["White Glow"] = {
+        beams = {
+            { tex="rbxassetid://12788927812", speed=7, len=4.5, mode=Enum.TextureMode.Static,   w0=1,   w1=1.5, cam=true,  emit=1,   inf=1, trans=0,   col=Color3.new(1,1,1) },
+            { tex="rbxassetid://12788927812", speed=7, len=4.5, mode=Enum.TextureMode.Static,   w0=1,   w1=1.5, cam=true,  emit=1,   inf=1, trans=0.2, col=Color3.new(1,1,1) },
+        },
+        particles = {}, -- Removed clumpy static particles to fix the 'wrong' look
+    },
+
+    ["Pink/Purple"] = {
+        beams = {
+            { tex="rbxassetid://12781881514", speed=2, len=50, mode=Enum.TextureMode.Static, w0=1, w1=1.5, cam=true, emit=1, inf=1, trans=0,   col=Color3.fromRGB(255,0,157) },
+            { tex="rbxassetid://12781881514", speed=2, len=50, mode=Enum.TextureMode.Static, w0=1, w1=1.5, cam=true, emit=1, inf=1, trans=0.2, col=Color3.fromRGB(170,0,255) },
+        },
+        particles = {
+            { tex="rbxassetid://12789695476", rate=10, emit=1, inf=1, rotspd=NR(0,0), rot=NR(-360,360), spread=Vector2.new(80,100), spd=NR(5,5), life=NR(0.5,0.7),
+              size =NS({NSK(0,1),NSK(0.899,1),NSK(0.945,0.375),NSK(1,0)}),
+              trans=NS({NSK(0,1),NSK(0.195,1),NSK(0.294,0.219),NSK(0.692,0.056),NSK(1,0)}), col=Color3.fromRGB(93,0,255) },
+            { tex="rbxassetid://12789671526", rate=8,  emit=1, inf=1, rotspd=NR(0,0), rot=NR(-360,360), spread=Vector2.new(80,100), spd=NR(5,5), life=NR(0.6,0.7),
+              size=NS(1), trans=NS(0.8), col=Color3.fromRGB(93,0,255) },
+        },
+    },
+
+    ["Blue Electric"] = {
+        beams = {
+            { tex="rbxassetid://12781800668", speed=3,   len=3,  mode=Enum.TextureMode.Stretch, w0=2, w1=2, cam=false, emit=1, inf=1, trans=0,   col=Color3.fromRGB(0,115,255) },
+            { tex="rbxassetid://12781800668", speed=4,   len=3,  mode=Enum.TextureMode.Stretch, w0=3, w1=3, cam=false, emit=1, inf=1, trans=0.7, col=Color3.fromRGB(0,115,255) },
+        },
+        particles = {
+            { tex="rbxassetid://12843271692", rate=14, emit=1, inf=1, rotspd=NR(0,0), rot=NR(0,0), spread=Vector2.new(55,55), spd=NR(25,25), life=NR(0.2,0.3),
+              size =NS({NSK(0,0.8125),NSK(0.07,2.125),NSK(0.89,1.5),NSK(0.917,0.5625),NSK(1,0)}),
+              trans=NS({NSK(0,0),NSK(0.867,0.05),NSK(0.918,0.544),NSK(1,1)}), col=Color3.fromRGB(0,115,255) },
+        },
+    },
+
+    ["Dark Blue"] = {
+        beams = {
+            { tex="rbxassetid://12781879045", speed=4, len=0.625, mode=Enum.TextureMode.Stretch, w0=2, w1=2, cam=true, emit=1, inf=1, trans=0,   col=Color3.fromRGB(0,34,255) },
+            { tex="rbxassetid://12781879045", speed=4, len=0.625, mode=Enum.TextureMode.Stretch, w0=3, w1=3, cam=true, emit=1, inf=1, trans=0.7, col=Color3.fromRGB(0,34,255) },
+        },
+        particles = {
+            { tex="rbxassetid://12788906330", rate=6, emit=1, inf=1, rotspd=NR(0,0), rot=NR(-360,360), spread=Vector2.new(35,35), spd=NR(20,20), life=NR(0.4,0.5),
+              size=NS({NSK(0,0.9375),NSK(1,3)}), trans=NS(0), col=Color3.fromRGB(0,34,255) },
+        },
+    },
+
+    ["Green"] = {
+        beams = {
+            { tex="rbxassetid://12781848822", speed=3.5, len=30, mode=Enum.TextureMode.Static, w0=3, w1=3, cam=true, emit=0.6, inf=1, trans=0,   col=Color3.fromRGB(89,255,0) },
+            { tex="rbxassetid://12781848822", speed=3.5, len=30, mode=Enum.TextureMode.Static, w0=3, w1=3, cam=true, emit=0.6, inf=1, trans=0.9, col=Color3.fromRGB(89,255,0) },
+        },
+        particles = {
+            { tex="rbxassetid://12788775266", rate=8, emit=0.35, inf=1, rotspd=NR(0,0), rot=NR(-360,360), spread=Vector2.new(50,50), spd=NR(10,10), life=NR(0.4,0.6),
+              size=NS(0.5),
+              trans=NS({NSK(0,1),NSK(0.07,0.269),NSK(0.163,0.069),NSK(0.91,0.069),NSK(0.961,0.269),NSK(1,1)}), col=Color3.fromRGB(89,255,0) },
+            { tex="rbxassetid://12788471156", rate=6, emit=0.45, inf=1, rotspd=NR(50,50), rot=NR(-360,360), spread=Vector2.new(80,80), spd=NR(5,5), life=NR(0.5,0.6),
+              size=NS(1), trans=NS({NSK(0,0.2),NSK(0.959,0.363),NSK(0.982,0.494),NSK(1,1)}), col=Color3.fromRGB(89,255,0) },
+        },
+    },
+
+    ["Orange"] = {
+        beams = {
+            { tex="rbxassetid://12781848822", speed=3, len=20, mode=Enum.TextureMode.Static, w0=2, w1=2, cam=true, emit=0.25, inf=1, trans=0,   col=Color3.fromRGB(255,106,0) },
+            { tex="rbxassetid://12781848822", speed=3, len=20, mode=Enum.TextureMode.Static, w0=2, w1=2, cam=true, emit=0.25, inf=1, trans=0,   col=Color3.fromRGB(255,106,0) },
+        },
+        particles = {
+            { tex="rbxassetid://12788471156", rate=8, emit=0.5, inf=1, rotspd=NR(50,50), rot=NR(-360,360), spread=Vector2.new(80,80), spd=NR(5,5), life=NR(0.5,0.6),
+              size=NS(1), trans=NS({NSK(0,0.2),NSK(0.959,0.363),NSK(0.982,0.494),NSK(1,1)}), col=Color3.fromRGB(255,106,0) },
+        },
+    },
+
+    ["Cyan"] = {
+        beams = {
+            { tex="rbxassetid://12781800668", speed=100, len=10, mode=Enum.TextureMode.Static, w0=2, w1=2, cam=true, emit=1, inf=1, trans=0, col=Color3.fromRGB(57,202,255) },
+            { tex="rbxassetid://12781800668", speed=100, len=10, mode=Enum.TextureMode.Static, w0=2, w1=2, cam=true, emit=1, inf=1, trans=0, col=Color3.fromRGB(57,202,255) },
+        },
+        particles = {
+            { tex="rbxassetid://7216848149", rate=12, emit=1, inf=1, rotspd=NR(0,0), rot=NR(90,90), spread=Vector2.new(60,60), spd=NR(30,30), life=NR(0.1,0.2),
+              size=NS({NSK(0,5.36),NSK(0.084,4.02),NSK(0.154,2.89),NSK(0.949,1.96),NSK(0.967,1.03),NSK(1,0)}),
+              trans=NS(0), col=Color3.fromRGB(57,202,255) },
+        },
+    },
+}
+
+-- State Variables (Rank Icons Overhead)
+local RankIconsEnabled = false
+local RankIconShowStreak = false
+local rankIconConnections = {}
+local rankIconGuis = {}
+
+-- Rim Cache & Global Ref
+local rimCache = {}
+local currentRim = nil
+local currentDist = math.huge
+local function updateRimCache()
+    rimCache = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA('Sound') and obj.Name == 'Swish' then
+            table.insert(rimCache, obj.Parent)
         end
-        if count ~= 6 then return false end
-        
-        local matches = 0
-        for i=1, 6 do
-            local val = t[i]
-            if type(val) == "string" and val:match("^[XYZ][12]$") then
-                matches = matches + 1
-            end
-        end
-        return matches == 6
+    end
+end
+updateRimCache()
+workspace.DescendantAdded:Connect(function(obj)
+    if obj:IsA('Sound') and obj.Name == 'Swish' then table.insert(rimCache, obj.Parent) end
+end)
+
+-- [ TEAM GOAL CHECK ] --
+local blockedRim = nil -- The friendly hoop to NOT shoot at
+local currentGameConn = nil -- Listener for game changes
+
+-- State Variables (Ball & Player) moved to top
+
+function ArurHubData.watchCurrentGame()
+    local char = lp.Character
+    local bball = char and char:FindFirstChild("Basketball")
+    
+    if not bball then
+        blockedRim = nil
+        ArurHubData.MilleniumRoster = {}
+        return
     end
 
-    -- Run getgc inside the actor's VM
-    local ok, gc = pcall(getgc, true)
-    if ok and type(gc) == "table" then
-        local funcsScanned = 0
-        for _, obj in pairs(gc) do
-            if type(obj) == "function" then
-                funcsScanned = funcsScanned + 1
-                local okU, upvals = pcall(debug.getupvalues, obj)
-                if okU and type(upvals) == "table" then
+    local gameFolder = bball:FindFirstChild("[GAME]")
+    local curGame = gameFolder and gameFolder:FindFirstChild("CurrentGame")
+    local courtModel = curGame and curGame.Value
+
+    if courtModel and typeof(courtModel) == "Instance" and courtModel:IsA("Model") then
+        local courtPlayers = courtModel:FindFirstChild("_CourtPlayers")
+        if courtPlayers then
+            local myTeamPrefix = nil
+            -- Detect my team assignment (Home/Away 1-5 as requested)
+            for i = 1, 5 do
+                local h = courtPlayers:FindFirstChild("Home"..i)
+                if h and h.Value == lp then myTeamPrefix = "Home"; break end
+                local a = courtPlayers:FindFirstChild("Away"..i)
+                if a and a.Value == lp then myTeamPrefix = "Away"; break end
+            end
+
+            if myTeamPrefix then
+                -- Cache the blocked rim
+                local hoop = courtModel:FindFirstChild(myTeamPrefix.."Hoop")
+                if hoop then 
+                    blockedRim = hoop:FindFirstChild("hoop") or hoop.PrimaryPart or hoop:FindFirstChildWhichIsA("BasePart", true)
+                end
+                
+                -- Cache all teammates
+                local newRoster = {}
+                for i = 1, 5 do
+                    local slot = courtPlayers:FindFirstChild(myTeamPrefix..i)
+                    if slot and slot.Value and slot.Value ~= lp then
+                        newRoster[slot.Value] = true
+                    end
+                end
+                ArurHubData.MilleniumRoster = newRoster
+                return
+            end
+        end
+    end
+
+    blockedRim = nil
+    ArurHubData.MilleniumRoster = {}
+end
+
+-- Roster Refresher Loop (Throttled to 2Hz)
+task.spawn(function()
+    while task.wait(0.5) do
+        if ArurHubData and ArurHubData.HasBall and ArurHubData.HasBall() and (ArurHubData.PassAimbotEnabled or ArurHubData.TeamGoalCheckEnabled) then
+            ArurHubData.watchCurrentGame()
+        end
+    end
+end)
+
+-- Cosmetic Metadata moved to top
+
+-- [ SHARED UTILS ] --
+function ArurHubData.HasBall(target)
+    local char = (target and target.Character) or lp.Character
+    return char and (char:FindFirstChild("Basketball") or char:FindFirstChild("Ball")) ~= nil
+end
+
+-- [ NOTIFICATION SYSTEM ] --
+local notificationGui = Instance.new('ScreenGui')
+notificationGui.Name = 'NotificationGui'
+notificationGui.Parent = playerGui
+notificationGui.ResetOnSpawn = false
+
+if isMobile or uis.TouchEnabled then
+    local uiScale = Instance.new("UIScale", notificationGui)
+    uiScale.Scale = math.clamp(camera.ViewportSize.Y / 750, 0.5, 0.9)
+    camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+        uiScale.Scale = math.clamp(camera.ViewportSize.Y / 750, 0.5, 0.9)
+    end)
+end
+
+local notifications = {}
+
+-- [ TARGET HUD SYSTEM ] --
+local targetHUDGui = Instance.new('BillboardGui', playerGui)
+targetHUDGui.Name = 'ArurTargetHUD'
+targetHUDGui.ResetOnSpawn = false
+targetHUDGui.Size = UDim2.new(0, 180, 0, 50)
+targetHUDGui.StudsOffset = Vector3.new(0, 0, 0) -- Lowered to torso/root level
+targetHUDGui.AlwaysOnTop = true
+targetHUDGui.MaxDistance = 150
+targetHUDGui.Enabled = false
+
+-- Use CanvasGroup for a flawless opacity fade of the entire HUD
+local targetMain = Instance.new('CanvasGroup')
+targetMain.Name = 'MainFrame'
+targetMain.Size = UDim2.new(1, 0, 1, 0)
+targetMain.AnchorPoint = Vector2.new(0.5, 0.5)
+targetMain.Position = UDim2.new(0.5, 0, 0.5, 0)
+targetMain.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+targetMain.BackgroundTransparency = 0.1
+targetMain.BorderSizePixel = 0
+targetMain.GroupTransparency = 1 -- Start completely invisible
+targetMain.Parent = targetHUDGui
+
+local targetHUDScaleFactor = Instance.new("UIScale", targetMain)
+targetHUDScaleFactor.Scale = 1.0
+
+function ArurHubData.updateTargetHUDScale()
+    if targetHUDScaleFactor then targetHUDScaleFactor.Scale = ArurHubData.TargetHUDScale or 1.0 end
+end
+
+Instance.new('UICorner', targetMain).CornerRadius = UDim.new(0, 6)
+
+-- Subtle Border
+local mainStroke = Instance.new('UIStroke', targetMain)
+mainStroke.Color = Color3.fromRGB(200, 200, 200)
+mainStroke.Transparency = 0.8
+mainStroke.Thickness = 1
+
+local targetAccent = Instance.new('Frame', targetMain)
+targetAccent.Size = UDim2.new(0, 3, 1, 0)
+targetAccent.Position = UDim2.new(0, 0, 0, 0)
+targetAccent.BackgroundColor3 = ArurHubData.TargetHUDAccentColor
+targetAccent.BorderSizePixel = 0
+Instance.new('UICorner', targetAccent).CornerRadius = UDim.new(0, 6)
+
+local targetImage = Instance.new('ImageLabel', targetMain)
+targetImage.Name = 'Avatar'
+targetImage.Size = UDim2.new(0, 34, 0, 34)
+targetImage.Position = UDim2.new(0, 12, 0.5, -17)
+targetImage.BackgroundTransparency = 1
+targetImage.Image = "rbxassetid://6073743781"
+Instance.new('UICorner', targetImage).CornerRadius = UDim.new(1, 0)
+
+-- Rank and Streak space on the name
+local nameContainer = Instance.new('Frame', targetMain)
+nameContainer.Name = 'NameContainer'
+nameContainer.Size = UDim2.new(1, -56, 0, 16)
+nameContainer.Position = UDim2.new(0, 56, 0.5, -16)
+nameContainer.BackgroundTransparency = 1
+
+local nameLayout = Instance.new('UIListLayout', nameContainer)
+nameLayout.FillDirection = Enum.FillDirection.Horizontal
+nameLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+nameLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+nameLayout.Padding = UDim.new(0, 4)
+nameLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local targetName = Instance.new('TextLabel', nameContainer)
+targetName.Name = 'PlayerName'
+targetName.Size = UDim2.new(0, 0, 1, 0)
+targetName.AutomaticSize = Enum.AutomaticSize.X
+targetName.BackgroundTransparency = 1
+targetName.TextColor3 = Color3.fromRGB(240, 240, 240)
+targetName.Font = Enum.Font.GothamBold
+targetName.TextSize = 14
+targetName.TextStrokeTransparency = 0.6
+targetName.TextXAlignment = Enum.TextXAlignment.Left
+targetName.Text = "Target Name"
+targetName.LayoutOrder = 1
+
+local targetRankIcon = Instance.new('ImageLabel', nameContainer)
+targetRankIcon.Name = 'RankIcon'
+targetRankIcon.Size = UDim2.new(0, 18, 0, 18) -- Slightly bigger
+targetRankIcon.BackgroundTransparency = 1
+targetRankIcon.LayoutOrder = 2
+targetRankIcon.Visible = false
+
+local targetStreakIcon = Instance.new('ImageLabel', nameContainer)
+targetStreakIcon.Name = 'StreakIcon'
+targetStreakIcon.Size = UDim2.new(0, 18, 0, 18) -- Slightly bigger
+targetStreakIcon.BackgroundTransparency = 1
+targetStreakIcon.LayoutOrder = 3
+targetStreakIcon.Visible = false
+
+local targetStreakText = Instance.new('TextLabel', targetStreakIcon)
+targetStreakText.Name = 'AmountLabel'
+targetStreakText.Size = UDim2.new(1, 0, 1, 0)
+targetStreakText.Position = UDim2.new(0, 0, 0, 0)
+targetStreakText.BackgroundTransparency = 1
+targetStreakText.TextColor3 = Color3.fromRGB(240, 240, 240)
+targetStreakText.Font = Enum.Font.GothamBold
+targetStreakText.TextSize = 10
+targetStreakText.TextStrokeTransparency = 0.2
+targetStreakText.Text = ""
+
+local distContainer = Instance.new('Frame', targetMain)
+distContainer.Name = 'DistContainer'
+distContainer.Size = UDim2.new(1, -56, 0, 14)
+distContainer.Position = UDim2.new(0, 56, 0.5, 0)
+distContainer.BackgroundTransparency = 1
+
+local distLayout = Instance.new('UIListLayout', distContainer)
+distLayout.FillDirection = Enum.FillDirection.Horizontal
+distLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+distLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+distLayout.Padding = UDim.new(0, 4)
+distLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local targetDist = Instance.new('TextLabel', distContainer)
+targetDist.Name = 'Distance'
+targetDist.Size = UDim2.new(0, 0, 1, 0)
+targetDist.AutomaticSize = Enum.AutomaticSize.X
+targetDist.BackgroundTransparency = 1
+targetDist.TextColor3 = Color3.fromRGB(255, 255, 255)
+targetDist.Font = Enum.Font.GothamMedium
+targetDist.TextSize = 12
+targetDist.TextStrokeTransparency = 0.8
+targetDist.TextXAlignment = Enum.TextXAlignment.Left
+targetDist.Text = "Dist: 0"
+targetDist.LayoutOrder = 1
+targetDist.RichText = true
+
+local isTargetHUDVisible = false
+function ArurHubData.animateTargetHUD(show, adornPart)
+    if isTargetHUDVisible == show then 
+        if show and adornPart and targetHUDGui.Adornee ~= adornPart then
+            targetHUDGui.Adornee = adornPart
+        end
+        return 
+    end
+    isTargetHUDVisible = show
+    if show then
+        targetHUDGui.Adornee = adornPart
+        targetHUDGui.Enabled = true
+        tween_service:Create(targetMain, TweenInfo.new(0.1, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {GroupTransparency = 0}):Play()
+    else
+        local tweenOut = tween_service:Create(targetMain, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {GroupTransparency = 1})
+        tweenOut:Play()
+        tweenOut.Completed:Connect(function()
+            if not isTargetHUDVisible then
+                targetHUDGui.Enabled = false
+                targetHUDGui.Adornee = nil
+            end
+        end)
+    end
+end
+
+function ArurHubData.updateTargetHUD(player, dist)
+    if not player or not player.Character then 
+        ArurHubData.animateTargetHUD(false) 
+        return 
+    end
+    local root = player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then 
+        ArurHubData.animateTargetHUD(false) 
+        return 
+    end
+    
+    local rawName = ArurHubData.TargetHUDDisplayName and player.DisplayName or player.Name
+    local displayName = rawName
+    if #displayName > 12 then
+        displayName = string.sub(displayName, 1, 10) .. "..."
+    end
+    targetName.Text = displayName
+    
+    ArurHubData.HasBball = ArurHubData.HasBall(player)
+    
+    ArurHubData.DistRenderStr = string.format('<font color="rgb(%d,%d,%d)">Dist: %d</font>', 
+        math.floor(ArurHubData.TargetHUDDistanceColor.R * 255), 
+        math.floor(ArurHubData.TargetHUDDistanceColor.G * 255), 
+        math.floor(ArurHubData.TargetHUDDistanceColor.B * 255), 
+        math.floor(dist)
+    )
+
+    if ArurHubData.HasBball then
+        ArurHubData.NearestHoop = getNearestRim(root.Position)
+        if ArurHubData.NearestHoop then
+            ArurHubData.HoopDist = (ArurHubData.NearestHoop.Position - root.Position).Magnitude
+            if ArurHubData.HoopDist <= 74 then
+                targetDist.Text = ArurHubData.DistRenderStr .. ' | <font color="rgb(0,255,0)">In Range</font>'
+            else
+                targetDist.Text = ArurHubData.DistRenderStr .. ' | <font color="rgb(255,50,50)">Out Range</font>'
+            end
+        else
+            targetDist.Text = ArurHubData.DistRenderStr
+        end
+    else
+        targetDist.Text = ArurHubData.DistRenderStr
+    end
+    
+    targetAccent.BackgroundColor3 = ArurHubData.TargetHUDAccentColor
+    targetImage.Image = "https://www.roblox.com/headshot-thumbnail/image?userId="..player.UserId.."&width=420&height=420&format=png"
+    
+    -- Extract actual game Rank & Streak icons
+    targetRankIcon.Visible = false
+    targetStreakIcon.Visible = false
+    
+    local nameTag = root:FindFirstChild("NameTag")
+    local mainFrame = nameTag and nameTag:FindFirstChild("MainFrame")
+    if mainFrame then
+        local srcRank = mainFrame:FindFirstChild("RankIcon")
+        if srcRank and srcRank.Image ~= "" then
+            targetRankIcon.Image = srcRank.Image
+            targetRankIcon.Visible = true
+        end
+        
+        local srcStreak = mainFrame:FindFirstChild("StreakIcon")
+        if srcStreak and srcStreak.Image ~= "" then
+            targetStreakIcon.Image = srcStreak.Image
+            targetStreakIcon.ImageRectOffset = srcStreak.ImageRectOffset
+            targetStreakIcon.ImageRectSize = srcStreak.ImageRectSize
+            
+            local srcAmt = srcStreak:FindFirstChild("AmountLabel")
+            if srcAmt and srcAmt.Text ~= "" then
+                local streakNum = tonumber(string.match(srcAmt.Text, "%d+")) or 0
+                if streakNum > 0 then
+                    targetStreakText.Text = srcAmt.Text
+                    targetStreakIcon.Visible = true
+                end
+            end
+        end
+    end
+
+    ArurHubData.animateTargetHUD(true, root)
+end
+
+local sync_guards = {
+    aimbot = false,
+    speed = false,
+    full_magnet = false,
+    shot_magnet = false,
+    lock = false
+}
+
+function ArurHubData.SendNotification(message, time, color)
+    if ArurHubData.HideNotifications then return end
+    if getgenv and getgenv().ArurHub_SuppressNotifs then return end
+    time = time or 5
+    color = color or Color3.fromRGB(130, 120, 255)
+
+    local CARD_W    = 260
+    local CARD_H    = 44
+    local STACK_GAP = CARD_H + 8
+    local idx       = #notifications + 1
+    local startY    = -(60 + (idx - 1) * STACK_GAP)
+
+    -- Root holder (slides in from right)
+    local notifHolder = Instance.new('Frame')
+    notifHolder.Name          = 'NotifCard'
+    notifHolder.Size          = UDim2.fromOffset(CARD_W, CARD_H)
+    notifHolder.Position      = UDim2.new(1, 20, 1, startY)
+    notifHolder.AnchorPoint   = Vector2.new(0, 1)
+    notifHolder.BackgroundTransparency = 1
+    notifHolder.Parent        = notificationGui
+    notifHolder.ZIndex        = 1400
+
+    -- Dark card background
+    local card = Instance.new('Frame', notifHolder)
+    card.Size                 = UDim2.fromScale(1, 1)
+    card.BackgroundColor3     = Color3.fromRGB(18, 18, 22)
+    card.BackgroundTransparency = 0.05
+    card.BorderSizePixel      = 0
+    card.ClipsDescendants     = true
+    card.ZIndex               = 1400
+    Instance.new('UICorner', card).CornerRadius = UDim.new(0, 10)
+
+    -- Subtle outer stroke
+    local stroke = Instance.new('UIStroke', card)
+    stroke.Color       = Color3.fromRGB(60, 60, 70)
+    stroke.Thickness   = 1
+    stroke.Transparency = 0.5
+
+    -- Colored left accent bar
+    local accent = Instance.new('Frame', card)
+    accent.Size              = UDim2.new(0, 3, 1, -12)
+    accent.Position          = UDim2.new(0, 8, 0, 6)
+    accent.AnchorPoint       = Vector2.new(0, 0)
+    accent.BackgroundColor3  = color
+    accent.BorderSizePixel   = 0
+    accent.ZIndex            = 1401
+    Instance.new('UICorner', accent).CornerRadius = UDim.new(1, 0)
+
+    -- Message text
+    local label = Instance.new('TextLabel', card)
+    label.Size                = UDim2.new(1, -28, 1, 0)
+    label.Position            = UDim2.new(0, 20, 0, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3          = Color3.fromRGB(230, 230, 235)
+    label.TextStrokeTransparency = 1
+    label.Text                = message
+    label.Font                = Enum.Font.GothamMedium
+    label.TextSize            = 13
+    label.TextXAlignment      = Enum.TextXAlignment.Left
+    label.TextYAlignment      = Enum.TextYAlignment.Center
+    label.TextTruncate        = Enum.TextTruncate.AtEnd
+    label.ZIndex              = 1402
+
+    -- Progress bar (shrinks over `time` seconds)
+    local progressBg = Instance.new('Frame', card)
+    progressBg.Size              = UDim2.new(1, -30, 0, 2)
+    progressBg.Position          = UDim2.new(0, 20, 1, -5)
+    progressBg.AnchorPoint       = Vector2.new(0, 1)
+    progressBg.BackgroundColor3  = Color3.fromRGB(40, 40, 50)
+    progressBg.BorderSizePixel   = 0
+    progressBg.ZIndex            = 1403
+    Instance.new('UICorner', progressBg).CornerRadius = UDim.new(1, 0)
+
+    local progressBar = Instance.new('Frame', progressBg)
+    progressBar.Size             = UDim2.fromScale(1, 1)
+    progressBar.BackgroundColor3 = color
+    progressBar.BorderSizePixel  = 0
+    progressBar.ZIndex           = 1404
+    Instance.new('UICorner', progressBar).CornerRadius = UDim.new(0, 2)
+
+    -- Slide in
+    local slideIn = tween_service:Create(notifHolder,
+        TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+        {Position = UDim2.new(1, -(CARD_W + 12), 1, startY)}
+    )
+    slideIn:Play()
+
+    -- Shrink progress bar
+    tween_service:Create(progressBar,
+        TweenInfo.new(time, Enum.EasingStyle.Linear),
+        {Size = UDim2.fromScale(0, 1)}
+    ):Play()
+
+    table.insert(notifications, notifHolder)
+
+    local function removeNotification()
+        local tweenOut = tween_service:Create(notifHolder,
+            TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+            {Position = UDim2.new(1, 20, 1, notifHolder.Position.Y.Offset)}
+        )
+        tweenOut:Play()
+        tweenOut.Completed:Wait()
+        notifHolder:Destroy()
+
+        for i, v in ipairs(notifications) do
+            if v == notifHolder then table.remove(notifications, i) break end
+        end
+        for i, notif in ipairs(notifications) do
+            local newY = -(60 + (i - 1) * STACK_GAP)
+            tween_service:Create(notif,
+                TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                {Position = UDim2.new(1, -(CARD_W + 12), 1, newY)}
+            ):Play()
+        end
+    end
+
+    task.delay(time, removeNotification)
+end
+
+-- [ TRAJECTORY INITIALIZATION ] --
+local arcContainer = Instance.new("Folder", workspace)
+arcContainer.Name = "ArurTrajectoryContainer"
+
+-- Build multi-layer beam pools
+for layer = 1, NUM_BEAM_LAYERS do
+    beamLayers[layer] = {}
+    attLayers[layer] = {}
+    for i = 1, 30 do
+        local attA = Instance.new("Attachment", workspace.Terrain)
+        local attB = Instance.new("Attachment", workspace.Terrain)
+        local b = Instance.new("Beam", workspace.Terrain)
+        b.Attachment0 = attA; b.Attachment1 = attB
+        b.FaceCamera = true; b.Width0 = 0.4; b.Width1 = 0.4
+        b.Enabled = false
+        table.insert(beamLayers[layer], b)
+        table.insert(attLayers[layer], {attA, attB})
+    end
+end
+-- Backward compat aliases
+beamPool = beamLayers[1]
+attachmentPool = attLayers[1]
+
+-- Build dot parts + particle emitters
+for i = 1, 30 do
+    local d = Instance.new("Part", arcContainer)
+    d.Size = Vector3.new(0.35, 0.35, 0.35); d.Shape = Enum.PartType.Ball
+    d.Material = Enum.Material.Neon; d.Anchored = true
+    d.CanCollide = false; d.CanTouch = false; d.CanQuery = false
+    d.CastShadow = false; d.Transparency = 1
+    table.insert(dotPool, d)
+    local dotPE = {}
+    for p = 1, NUM_PARTICLE_TYPES do
+        local pe = Instance.new("ParticleEmitter", d)
+        pe.Rate = 0; pe.Enabled = false
+        table.insert(dotPE, pe)
+    end
+    table.insert(dotParticleSets, dotPE)
+end
+
+-- Apply a beam style preset to all pools
+function ArurHubData.applyBeamStyle(name)
+    currentBeamStyle = name
+    local style = BEAM_STYLES[name] or BEAM_STYLES["Plain"]
+    for layer = 1, NUM_BEAM_LAYERS do
+        local bd = style.beams[layer]
+        for _, b in ipairs(beamLayers[layer]) do
+            if bd then
+                b.Texture        = bd.tex
+                b.TextureSpeed   = bd.speed
+                b.TextureLength  = bd.len
+                b.TextureMode    = bd.mode
+                b.Width0         = bd.w0
+                b.Width1         = bd.w1
+                b.FaceCamera     = bd.cam
+                b.LightEmission  = bd.emit
+                b.LightInfluence = bd.inf
+                b.Color          = ColorSequence.new(bd.col)
+                b.Transparency   = NumberSequence.new(bd.trans)
+            else
+                b.Enabled = false
+            end
+        end
+    end
+    for _, dotPE in ipairs(dotParticleSets) do
+        for p = 1, NUM_PARTICLE_TYPES do
+            local pe = dotPE[p]
+            local pd = style.particles[p]
+            if pd then
+                pe.Texture        = pd.tex
+                pe.LightEmission  = pd.emit
+                pe.LightInfluence = pd.inf
+                pe.RotSpeed       = pd.rotspd
+                pe.Rotation       = pd.rot
+                pe.SpreadAngle    = pd.spread
+                pe.Speed          = pd.spd
+                pe.Lifetime       = pd.life
+                pe.Size           = pd.size
+                pe.Transparency   = pd.trans
+                pe.Color          = ColorSequence.new(pd.col)
+            end
+            pe.Rate    = 0
+            pe.Enabled = false
+        end
+    end
+end
+ArurHubData.applyBeamStyle("Plain")
+
+local function notify(text)
+    ArurHubData.SendNotification(text, 3, Color3.fromRGB(0, 170, 255))
+end
+
+-- [ LOGIC FUNCTIONS ] --
+function ArurHubData.HasBall(targetPlayer)
+    local char = (targetPlayer or lp).Character
+    if not char then return false end
+    if char:FindFirstChild("Basketball") or char:FindFirstChild("basketball") then return true end
+    for _, obj in ipairs(char:GetChildren()) do
+        if string.match(string.lower(obj.Name), "basketball") then return true end
+    end
+    return char:FindFirstChild("Ball") ~= nil
+end
+
+local function powerForDistance(d)
+    if d <= 16 then return 30
+    elseif d <= 20 then return 35
+    elseif d <= 25 then return 40
+    elseif d <= 28 then return 45
+    elseif d <= 34 then return 50
+    elseif d <= 38 then return 55
+    elseif d <= 42 then return 60
+    elseif d <= 46 then return 65
+    elseif d <= 54 then return 70
+    elseif d <= 59 then return 75
+    elseif d <= 65 then return 80
+    else return 85 end
+end
+
+local function arcLow(d)
+    if d < 16 then return 15
+    elseif d < 18 then return 18
+    elseif d < 20 then return 16
+    elseif d < 25 then return 20
+    elseif d < 28 then return 25
+    elseif d < 31 then return 30
+    elseif d < 34 then return 25
+    elseif d < 36 then return 35
+    elseif d < 38 then return 30
+    elseif d < 40 then return 42
+    elseif d < 42 then return 38
+    elseif d < 43 then return 48
+    elseif d < 46 then return 45
+    elseif d < 48 then return 56
+    elseif d < 52 then return 53
+    elseif d < 54 then return 42
+    elseif d < 56 then return 58
+    elseif d < 58 then return 52
+    elseif d < 59 then return 39
+    elseif d < 60 then return 66
+    elseif d < 62 then return 64
+    elseif d < 63 then return 63
+    elseif d < 64 then return 55
+    elseif d < 65 then return 50
+    elseif d < 66 then return 75
+    elseif d < 67 then return 73
+    elseif d < 69 then return 68
+    elseif d < 70 then return 67
+    elseif d < 71 then return 57
+    else return 52 end
+end
+
+local function arcHigh(d)
+    if d < 13 then return 123
+    elseif d < 16 then return 121
+    elseif d < 18 then return 120
+    elseif d < 21 then return 117
+    elseif d < 27 then return 114
+    elseif d < 33 then return 112
+    elseif d < 37 then return 108
+    elseif d < 42 then return 105
+    elseif d < 46 then return 102
+    elseif d < 48 then return 100
+    elseif d < 50 then return 98
+    elseif d < 53 then return 96
+    elseif d < 56 then return 93
+    elseif d < 58 then return 89
+    elseif d < 61 then return 85
+    elseif d < 63 then return 81
+    elseif d < 65 then return 78
+    elseif d < 66 then return 75
+    elseif d < 68 then return 72
+    elseif d < 69 then return 65
+    elseif d < 70 then return 62
+    else return 55 end
+end
+
+local validCourts = { "Court E", "Court F", "Court G", "Court H", "Court I", "Court K" }
+
+-- Rims Cache
+local rimParts = {}
+for _, obj in ipairs(workspace:GetDescendants()) do
+    if obj:IsA('Sound') and obj.Name == 'Swish' then
+        table.insert(rimParts, obj.Parent)
+    end
+end
+
+function getNearestRim(customPos)
+    local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    local origin = customPos or (root and root.Position)
+    if not origin then return nil, math.huge end
+    local dist, rim = math.huge, nil
+    for _, r in ipairs(rimCache) do
+        if r and r:IsA("BasePart") then
+            -- Skip the friendly hoop via Physics Distance (Immune to instance resets and swish-hitbox mismatches)
+            if ArurHubData.TeamGoalCheckEnabled and blockedRim and typeof(blockedRim) == "Instance" and blockedRim:IsA("BasePart") then
+                if (r.Position - blockedRim.Position).Magnitude < 25 then
+                    continue
+                end
+            end
+            local rFlat = Vector3.new(r.Position.X, origin.Y, r.Position.Z)
+            local d = (rFlat - origin).Magnitude
+            if d < dist then dist = d; rim = r end
+        end
+    end
+    return rim, dist
+end
+
+local function getNearestPart(torso)
+    local dist, part = 9e9, nil
+    local plrCharacter = lp.Character
+    for _, v in ipairs(plrCharacter:GetChildren()) do
+        if v:IsA('Part') then
+            local mag = (v.Position - torso.Position).Magnitude
+            if mag < dist then
+                dist = mag
+                part = v
+            end
+        end
+    end
+    return part, dist
+end
+
+local function findClosest()
+    local myRoot = lp.Character and lp.Character:FindFirstChild('HumanoidRootPart')
+    if not myRoot then return nil end
+
+    local closest = nil
+    local bestDist = math.huge
+
+    for _, otherPlayer in pairs(players:GetPlayers()) do
+        if otherPlayer ~= lp then
+            local root = otherPlayer.Character and otherPlayer.Character:FindFirstChild('HumanoidRootPart')
+            if root then
+                local dist = (Vector2.new(root.Position.X, root.Position.Z) - Vector2.new(myRoot.Position.X, myRoot.Position.Z)).Magnitude
+                if dist < bestDist then
+                    bestDist = dist
+                    closest = otherPlayer
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function fireDeviceEvent(arg)
+    local success, err = pcall(function()
+        replicated_storage:WaitForChild('Remotes'):WaitForChild('deviceEvent'):FireServer(arg)
+    end)
+end
+
+local mt = getrawmetatable(game)
+setreadonly(mt, false)
+local oldNamecall = mt.__namecall
+mt.__namecall = function(self, ...)
+    local method = getnamecallmethod()
+    local args = { ... }
+
+    if ArurHubData.AntiTravelEnabled and method == 'FireServer' then
+        if self.Name == 'sbEvent' and args[1] == 'Travel' then
+            return nil
+        end
+    end
+
+    return oldNamecall(self, ...)
+end
+
+-- Block lukeEvent from Actor VM (always active, runs at startup)
+if run_on_actor then
+    local actorCode = [[
+        local ok, lukeEvent = pcall(function()
+            return game:GetService("ReplicatedStorage").Remotes.lukeEvent
+        end)
+        if not ok or not lukeEvent then return end
+
+        local mt = getrawmetatable(game)
+        local oldNamecall = mt.__namecall
+        setreadonly(mt, false)
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if self == lukeEvent and (method == "FireServer" or method == "fireServer") then
+                return
+            end
+            return oldNamecall(self, ...)
+        end)
+        setreadonly(mt, true)
+    ]]
+    local function hookActor(actor)
+        local hooked, attempts = false, 0
+        repeat hooked = pcall(run_on_actor, actor, actorCode) task.wait(0.25) attempts += 1 until hooked or attempts > 20
+    end
+    
+    local allActors = {}
+    if typeof(getactors) == "function" then
+        pcall(function()
+            for _, act in ipairs(getactors()) do
+                table.insert(allActors, act)
+            end
+        end)
+    end
+    
+    if #allActors == 0 then
+        for _, obj in ipairs(game:GetDescendants()) do
+            if obj:IsA("Actor") then
+                table.insert(allActors, obj)
+            end
+        end
+    end
+    
+    for _, actor in ipairs(allActors) do task.spawn(hookActor, actor) end
+    game.DescendantAdded:Connect(function(object)
+        if object:IsA("Actor") then task.spawn(hookActor, object) end
+    end)
+end
+
+
+-- Screen elements
+local rangeLabel = Instance.new('TextLabel', arurHubGui)
+rangeLabel.Size = UDim2.new(0, 200, 0, 50)
+rangeLabel.Position = UDim2.new(0.5, -100, 0.8, 0)
+rangeLabel.AnchorPoint = Vector2.new(0.5, 1)
+rangeLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+rangeLabel.BackgroundTransparency = 0.5
+rangeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+rangeLabel.Font = Enum.Font.SourceSansBold
+rangeLabel.TextScaled = true
+rangeLabel.Visible = false
+
+-- Removed individual setupHighlight, replaced with unified visuals system
+lp.CharacterAdded:Connect(function(c)
+    if highlight then
+        highlight.Adornee = c
+        highlight.Parent = c
+    end
+end)
+
+-- [ SCORE EFFECTS & BALL SKINS POPULATOR ] --
+pcall(function()
+    local ballFolder = replicated_storage:FindFirstChild("ShopItems") and replicated_storage.ShopItems:FindFirstChild("Ball")
+    if ballFolder then
+        for _, v in ipairs(ballFolder:GetChildren()) do
+            local originalName = v.Name
+            local cleanName = originalName:gsub("^[Bb][Aa][Ll][Ll]_?", ""):gsub("_", " ")
+            cleanName = cleanName:gsub("^%l", string.upper)
+            table.insert(ArurHubCosmetics.BallNames, cleanName)
+            ArurHubCosmetics.BallNameMap[cleanName] = originalName
+        end
+    end
+    
+    local auraFolder = replicated_storage:FindFirstChild("ShopItems") and replicated_storage.ShopItems:FindFirstChild("Aura")
+    if auraFolder then
+        for _, v in ipairs(auraFolder:GetChildren()) do
+            local originalName = v.Name
+            local cleanName = originalName:gsub("^[Aa][Uu][Rr][Aa]_?", ""):gsub("_", " ")
+            cleanName = cleanName:gsub("^%l", string.upper)
+            
+            if v:IsA("Model") then -- Body Auras are Models
+                table.insert(ArurHubCosmetics.BodyAuraNames, cleanName)
+                ArurHubCosmetics.BodyAuraNameMap[cleanName] = originalName
+            elseif v:IsA("BasePart") then -- Ball Auras are Parts
+                table.insert(ArurHubCosmetics.BallAuraNames, cleanName)
+                ArurHubCosmetics.BallAuraNameMap[cleanName] = originalName
+            end
+        end
+    end
+
+    local trailFolder = replicated_storage:FindFirstChild("ShopItems") and replicated_storage.ShopItems:FindFirstChild("Trail")
+    if trailFolder then
+        for _, v in ipairs(trailFolder:GetChildren()) do
+            local originalName = v.Name
+            local cleanName = originalName:gsub("^[Tt][Rr][Aa][Ii][Ll]_?", ""):gsub("_", " ")
+            cleanName = cleanName:gsub("^%l", string.upper)
+            table.insert(ArurHubCosmetics.BallTrailNames, cleanName)
+            ArurHubCosmetics.BallTrailNameMap[cleanName] = originalName
+            
+            -- Detect color for Perfect Shot matching
+            pcall(function()
+                local tObj = v:FindFirstChildOfClass("Trail") or v:FindFirstChildWhichIsA("Trail", true)
+                if tObj then
+                    ArurHubCosmetics.BallTrailColorMap[cleanName] = tObj.Color.Keypoints[1].Value
+                else
+                    ArurHubCosmetics.BallTrailColorMap[cleanName] = Color3.fromRGB(255, 255, 255) -- fallback
+                end
+            end)
+        end
+    end
+end)
+
+
+
+
+-- Consolidated to ArurHubData
+
+
+
+
+
+
+-- [ NATIVE ASSET REFRESH (Instant Sync) ] --
+local cachedConnections = nil
+function ArurHubData.getNearestBallInWorkspace()
+    local nearest, dist = nil, 25
+    local head = lp.Character and lp.Character:FindFirstChild("Head")
+    if not head then return end
+    
+    -- Optimized search using the same pattern as the working Ball Magnet
+    for _, folder in ipairs(workspace:GetChildren()) do
+        if folder.Name == "Basketball" and folder ~= lp.Character then
+            for _, ball in ipairs(folder:GetChildren()) do
+                if ball:IsA("BasePart") and ball.Name == "Ball" then
+                    local d = (ball.Position - head.Position).Magnitude
+                    if d < dist then
+                        dist = d
+                        nearest = ball
+                    end
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local function applyBallSkinNative()
+    if not ArurHubData.ballSkinEnabled then return end
+    local char = lp.Character
+    local ballTool = char and (char:FindFirstChild("Basketball") or char:FindFirstChild("Ball"))
+    local ballPart = ballTool and (ballTool:FindFirstChild("Ball") or ballTool:FindFirstChild("Handle") or ballTool:IsA("BasePart") and ballTool)
+    if not ballPart then return end
+    
+    local realSkinName = ArurHubCosmetics.BallNameMap[ArurHubData.currentBallSkin]
+    if not realSkinName then return end
+
+    task.spawn(function()
+        pcall(function()
+            local replicateEvent = replicated_storage.Remotes:FindFirstChild("replicateEvent")
+            if not replicateEvent then return end
+            firesignal(replicateEvent.OnClientEvent, ballPart, "Ball", realSkinName)
+        end)
+    end)
+end
+
+local function applyBallAuraNative()
+    if not ArurHubData.ballAuraEnabled then return end
+    local char = lp.Character
+    local ballTool = char and (char:FindFirstChild("Basketball") or char:FindFirstChild("Ball"))
+    local ballPart = ballTool and (ballTool:FindFirstChild("Ball") or ballTool:FindFirstChild("Handle") or ballTool:IsA("BasePart") and ballTool)
+    if not ballPart then return end
+    
+    local realAuraName = ArurHubCosmetics.BallAuraNameMap[ArurHubData.currentBallAura]
+    if not realAuraName then return end
+
+    task.spawn(function()
+        pcall(function()
+            local replicateEvent = replicated_storage.Remotes:FindFirstChild("replicateEvent")
+            if not replicateEvent then return end
+            firesignal(replicateEvent.OnClientEvent, ballPart, "Aura", realAuraName)
+        end)
+    end)
+end
+
+local function applyBallTrailNative()
+    -- Event-based application handled by hook
+end
+
+-- [ TRAIL SHOT HOOK ] --
+task.spawn(function()
+    local shootRem = replicated_storage.Remotes:WaitForChild("ShootingEvent")
+    
+    local function applyShotTrail()
+        if not ArurHubData.ballTrailEnabled then return end
+        local realTrailName = ArurHubCosmetics.BallTrailNameMap[ArurHubData.currentBallTrail]
+        if not realTrailName then return end
+        
+        task.spawn(function()
+            for i = 1, 10 do
+                local ball = ArurHubData.getNearestBallInWorkspace()
+                if ball then
+                    firesignal(replicated_storage.Remotes.replicateEvent.OnClientEvent, ball, "Trail", realTrailName)
+                    break
+                end
+                run_service.Heartbeat:Wait()
+            end
+        end)
+    end
+
+    -- Use direct Signal Listening (Checker) instead of metatable hooking for zero-delay trails
+    shootRem.OnClientEvent:Connect(function(...)
+        applyShotTrail()
+    end)
+end)
+
+pcall(function()
+    local ScoreEffects = require(replicated_storage:WaitForChild("ScoreEffects"))
+    
+    local upvalueFreq = {}
+    local wrapperUpvalues = {}
+    for name, func in pairs(ScoreEffects) do
+        if type(func) == "function" then
+            wrapperUpvalues[name] = {}
+            for i = 1, 10 do
+                local s, v = pcall(debug.getupvalue, func, i)
+                if s and type(v) == "function" and v ~= func then
+                    table.insert(wrapperUpvalues[name], v)
+                    upvalueFreq[v] = (upvalueFreq[v] or 0) + 1
+                end
+            end
+        end
+    end
+
+    local originalWrappers = {}
+    local rawEffects = {}
+    for name, func in pairs(ScoreEffects) do
+        if type(func) == "function" then
+            originalWrappers[name] = func
+            local rawFunc = func
+            for _, upValFunc in ipairs(wrapperUpvalues[name] or {}) do
+                if upvalueFreq[upValFunc] and upvalueFreq[upValFunc] <= 5 then
+                    rawFunc = upValFunc
+                    break
+                end
+            end
+            if rawFunc == func and wrapperUpvalues[name] and wrapperUpvalues[name][1] then
+                rawFunc = wrapperUpvalues[name][1]
+            end
+            rawEffects[name] = rawFunc
+        end
+    end
+
+    ArurHubCosmetics.EffectNames = {}
+    for name in pairs(rawEffects) do table.insert(ArurHubCosmetics.EffectNames, name) end
+    table.sort(ArurHubCosmetics.EffectNames)
+
+
+    -- Final Redirection Hook (Proven stable method)
+    for name, func in pairs(ScoreEffects) do
+        if type(func) == "function" then
+            ScoreEffects[name] = function(plr, ...)
+                local target = name
+                
+                -- Redirection only (Matches Full New logic)
+                if plr == lp and ArurHubData.effectEnabled and name ~= "Perfect Shot" and name ~= "Level Up" and name ~= "Level Down" then
+                    target = ArurHubData.currentEffect
+                end
+
+                local raw = rawEffects[target] or rawEffects[name]
+                local wrap = originalWrappers[target] or originalWrappers[name]
+                
+                if raw and raw ~= wrap then return raw(plr, ...)
+                elseif wrap then return wrap(plr, ...) end
+            end
+        end
+    end
+end)
+
+-- [ ENGINE-LEVEL PERFECT HIJACK ] --
+task.spawn(function()
+    local perfectEvent = replicated_storage.Remotes:WaitForChild("perfectEvent")
+    
+    local function hookConnection(conn)
+        local oldFunc = conn.Function
+        if not oldFunc or getinfo(oldFunc).source:find("ArurHub") then return end
+        
+        conn:Disconnect()
+        perfectEvent.OnClientEvent:Connect(function(plr, colorSeq, pos)
+            local finalSeq = colorSeq
+            if plr == lp then
+                local targetColor = Color3.fromRGB(170, 85, 255)
+                if ArurHubData.useCustomPerfectResult then 
+                    targetColor = ArurHubData.perfectResultColor
+                elseif ArurHubData.syncPerfectWithTrail and ArurHubData.ballTrailEnabled then 
+                    targetColor = ArurHubCosmetics.BallTrailColorMap[ArurHubData.currentBallTrail] or targetColor 
+                end
+                finalSeq = ColorSequence.new(targetColor)
+            end
+            return oldFunc(plr, finalSeq, pos)
+        end)
+    end
+
+    -- Scans for game's listener and hijacks it
+    for _, conn in ipairs(getconnections(perfectEvent.OnClientEvent)) do
+        hookConnection(conn)
+    end
+    
+    lp.CharacterAdded:Connect(function()
+        task.wait(2)
+        for _, conn in ipairs(getconnections(perfectEvent.OnClientEvent)) do
+            hookConnection(conn)
+        end
+    end)
+end)
+
+
+
+
+-- [ SMART REPLICATOR HOOK ] --
+-- This hijacks the game's internal cosmetics chef to swap items before they render
+task.spawn(function()
+    local Replicator = _G.ArurHub_Replicator or require(replicated_storage:WaitForChild("Util"):WaitForChild("Replicator"))
+    
+    -- 1. Ball Skin Hook
+    local oldReplicateBall = Replicator.ReplicateBall
+    Replicator.ReplicateBall = function(ball, skin)
+        if ball and ball:IsDescendantOf(lp.Character) then
+            if ArurHubData.ballSkinEnabled and ArurHubData.currentBallSkin ~= "" then
+                skin = ArurHubCosmetics.BallNameMap[ArurHubData.currentBallSkin] or skin
+            end
+        end
+        return oldReplicateBall(ball, skin)
+    end
+
+    -- 2. Ball Aura Hook
+    local oldReplicateAura = Replicator.ReplicateAura
+    Replicator.ReplicateAura = function(obj, name)
+        -- Only intercept if it's a Ball (Parts), not a Player (Models)
+        if obj and obj:IsA("BasePart") and obj:IsDescendantOf(lp.Character) then
+            if ArurHubData.ballAuraEnabled and ArurHubData.currentBallAura ~= "" then
+                name = ArurHubCosmetics.BallAuraNameMap[ArurHubData.currentBallAura] or name
+            -- Sync with Ball Skin if specifically matching
+            elseif ArurHubData.ballSkinEnabled and ArurHubData.currentBallSkin ~= "" and name == "Aura_Default" then
+                name = ArurHubCosmetics.BallNameMap[ArurHubData.currentBallSkin] or name
+            end
+        end
+        return oldReplicateAura(obj, name)
+    end
+
+    -- 3. Ball Trail Hook (Shoot detection)
+    local oldReplicateTrail = Replicator.ReplicateTrail
+    Replicator.ReplicateTrail = function(obj, name)
+        if obj and obj:IsDescendantOf(lp.Character) then
+            if ArurHubData.ballTrailEnabled and ArurHubData.currentBallTrail ~= "" then
+                -- Only swap if the game is actually trying to APPLY a trail (not clearing it)
+                if name ~= nil and name ~= "" then
+                    name = ArurHubCosmetics.BallTrailNameMap[ArurHubData.currentBallTrail] or name
+                end
+            end
+        end
+        return oldReplicateTrail(obj, name)
+    end
+end)
+-- Helper to force-sync cosmetics if you're already holding a ball
+-- [ NATURAL ASSET HIJACKING ] --
+-- This is the "Proper Way" to fix cosmetics: lie to the game's asset registry.
+local function syncCurrentBall()
+    pcall(function()
+        local shop = replicated_storage:FindFirstChild("ShopItems")
+        if not shop then return end
+
+        local function hijackValue(category, arurDataKey, cosmeticMap)
+            local res, currentEquipped = pcall(function() return require(replicated_storage.Util.PlayerData).Get("Equipping", category) end)
+            if res and currentEquipped and shop:FindFirstChild(category) then
+                local obj = shop[category]:FindFirstChild(currentEquipped)
+                if obj and (obj:IsA("StringValue") or obj:IsA("ObjectValue")) then
+                    if not obj:GetAttribute("OriginalValue") then obj:SetAttribute("OriginalValue", obj.Value) end
+                    
+                    if ArurHubData[arurDataKey .. "Enabled"] then -- Check if the specific feat is enabled
+                        local targetInternal = cosmeticMap[ArurHubData["current" .. category]]
+                        if targetInternal then obj.Value = targetInternal end
+                    else
+                        -- REVERT to game original
+                        obj.Value = obj:GetAttribute("OriginalValue")
+                    end
+                end
+            end
+        end
+
+        hijackValue("Ball", "ballSkin", ArurHubCosmetics.BallNameMap)
+        hijackValue("Aura", "ballAura", ArurHubCosmetics.BallAuraNameMap)
+        hijackValue("Trail", "ballTrail", ArurHubCosmetics.BallTrailNameMap)
+    end)
+
+    -- Force instant update via direct attributes (The Natural Way)
+    for _, ball in ipairs(collection_service:GetTagged("Ball")) do
+        if ball:IsA("BasePart") then
+            ball:SetAttribute("Ball", ArurHubData.ballSkinEnabled and ArurHubCosmetics.BallNameMap[ArurHubData.currentBallSkin] or nil)
+            ball:SetAttribute("Aura", ArurHubData.ballAuraEnabled and ArurHubCosmetics.BallAuraNameMap[ArurHubData.currentBallAura] or nil)
+            ball:SetAttribute("Trail", ArurHubData.ballTrailEnabled and ArurHubCosmetics.BallTrailNameMap[ArurHubData.currentBallTrail] or nil)
+        end
+    end
+end
+
+local function refreshBodyAura()
+    local char = lp.Character
+    if not char then return end
+
+    -- 1. Surgical Cleanup
+    for _, obj in ipairs(char:GetDescendants()) do
+        if obj:GetAttribute("ArurHub_AuraEffect") then
+            obj:Destroy()
+        end
+    end
+
+    if not ArurHubData.bodyAuraEnabled then 
+        char:SetAttribute("Aura", nil)
+        return 
+    end
+
+    local auraTarget = ArurHubCosmetics.BodyAuraNameMap[ArurHubData.currentBodyAura]
+    if not auraTarget then return end
+
+    -- Direct extraction path
+    local shop = replicated_storage:FindFirstChild("ShopItems")
+    local auraFolder = shop and shop:FindFirstChild("Aura")
+    local auraModel = auraFolder and auraFolder:FindFirstChild(auraTarget)
+    
+    if not auraModel then return end
+
+    -- 2. Smart Mirroring (R6 & R15 Compatible)
+    local function getTargetPart(name)
+        -- Map common part names between rig types
+        local mapping = {
+            ["Torso"] = {"Torso", "UpperTorso", "LowerTorso"},
+            ["Left Arm"] = {"Left Arm", "LeftUpperArm", "LeftHand"},
+            ["Right Arm"] = {"Right Arm", "RightUpperArm", "RightHand"},
+            ["Left Leg"] = {"Left Leg", "LeftUpperLeg", "LeftFoot"},
+            ["Right Leg"] = {"Right Leg", "RightUpperLeg", "RightFoot"}
+        }
+        
+        local targets = mapping[name] or {name}
+        for _, t in ipairs(targets) do
+            local found = char:FindFirstChild(t)
+            if found then return found end
+        end
+        return nil
+    end
+
+    for _, auraComp in ipairs(auraModel:GetChildren()) do
+        if auraComp.Name == "Rig" and auraComp:IsA("Model") then
+            -- DEEP RIG EXTRACTION: Go inside the NPC blueprint
+            for _, rigPart in ipairs(auraComp:GetChildren()) do
+                if rigPart:IsA("BasePart") then
+                    local targetPart = getTargetPart(rigPart.Name)
+                    if targetPart then
+                        for _, effect in ipairs(rigPart:GetChildren()) do
+                            local clone = effect:Clone()
+                            clone:SetAttribute("ArurHub_AuraEffect", true)
+                            clone:SetAttribute("Aura", true)
+                            
+                            -- Physics Safety: Ensure cloned parts never interfere with movement
+                            if clone:IsA("BasePart") then
+                                clone.CanCollide = false
+                                clone.CanTouch = false
+                                clone.CanQuery = false
+                            end
+
+                            if clone:IsA("ParticleEmitter") or clone:IsA("Light") or clone:IsA("Beam") then
+                                clone.Enabled = true
+                            end
+                            clone.Parent = targetPart
+                        end
+                    end
+                end
+            end
+        elseif auraComp.Name ~= "Rig" then 
+            -- STANDALONE EFFECTS: Mirror non-rig items directly
+            local targetPart = getTargetPart(auraComp.Name)
+            if targetPart and targetPart:IsA("BasePart") then
+                for _, effect in ipairs(auraComp:GetChildren()) do
+                    local clone = effect:Clone()
+                    clone:SetAttribute("ArurHub_AuraEffect", true)
+                    clone:SetAttribute("Aura", true)
+                    
+                    if clone:IsA("BasePart") then
+                        clone.CanCollide = false
+                        clone.CanTouch = false
+                        clone.CanQuery = false
+                    end
+
+                    if clone:IsA("ParticleEmitter") or clone:IsA("Light") or clone:IsA("Beam") then
+                        clone.Enabled = true
+                    end
+                    clone.Parent = targetPart
+                end
+            else
+                local clone = auraComp:Clone()
+                clone:SetAttribute("ArurHub_AuraEffect", true)
+                clone:SetAttribute("Aura", true)
+                clone.Parent = char
+            end
+        end
+    end
+
+    -- 3. LOD/Attribute Sync
+    local parts = {"Head", "HumanoidRootPart", "Torso", "UpperTorso", "Left Arm", "Right Arm"}
+    for _, partName in ipairs(parts) do
+        local p = char:FindFirstChild(partName)
+        if p then p:SetAttribute("Aura", auraTarget) end
+    end
+    char:SetAttribute("Aura", auraTarget)
+end
+
+
+
+
+
+
+-- Auto-refresh on respawn
+lp.CharacterAppearanceLoaded:Connect(function(char)
+    task.wait(0.5) -- Briefly wait for game's own visuals to settle
+    if ArurHubData.bodyAuraEnabled then
+        refreshBodyAura()
+    end
+end)
+
+
+-- [ PLAYERDATA HOOK ] --
+
+
+task.spawn(function()
+    local PlayerData = require(replicated_storage:WaitForChild("Util"):WaitForChild("PlayerData"))
+    
+    -- Safe Native Replicator Requirement
+    pcall(function()
+        _G.ArurHub_Replicator = require(replicated_storage:WaitForChild("Util"):WaitForChild("Replicator"))
+    end)
+    
+    local oldGet = PlayerData.Get
+
+    
+    -- Optimized Hook: Use direct mapping for hot keys
+    local hookMap = {
+        Equipping = { Ball = true, Aura = true, Trail = true },
+        Config = {
+            Toggle_BallSkins = true,
+            Toggle_BallAuras = true,
+            Toggle_BallTrails = true,
+            Toggle_Auras = true
+        }
+    }
+    
+    PlayerData.Get = function(p2, p3)
+        local category = hookMap[p2]
+        if category and category[p3] then
+            if p2 == "Equipping" then
+                if p3 == "Ball" and ArurHubData.ballSkinEnabled then
+                    return ArurHubCosmetics.BallNameMap[ArurHubData.currentBallSkin] or oldGet(p2, p3)
+                elseif p3 == "Aura" and ArurHubData.ballAuraEnabled then
+                    return ArurHubCosmetics.BallAuraNameMap[ArurHubData.currentBallAura] or oldGet(p2, p3)
+                elseif p3 == "Trail" and ArurHubData.ballTrailEnabled then
+                    return ArurHubCosmetics.BallTrailNameMap[ArurHubData.currentBallTrail] or oldGet(p2, p3)
+                end
+            elseif p2 == "Config" then
+                if p3 == "Toggle_BallSkins" and ArurHubData.ballSkinEnabled then return true end
+                if p3 == "Toggle_BallAuras" and ArurHubData.ballAuraEnabled then return true end
+                if p3 == "Toggle_BallTrails" and ArurHubData.ballTrailEnabled then return true end
+                if p3 == "Toggle_Auras" and ArurHubData.bodyAuraEnabled then return true end
+            end
+        end
+        return oldGet(p2, p3)
+    end
+
+    -- [ INTERNAL STATE PATCHING ] --
+    -- Trick scripts that read PlayerData.storedData directly
+    task.spawn(function()
+        while task.wait(0.5) do
+            pcall(function()
+                if PlayerData.storedData and PlayerData.storedData.Equipping then
+                    if ArurHubData.ballSkinEnabled and ArurHubCosmetics.BallNameMap[ArurHubData.currentBallSkin] then
+                        PlayerData.storedData.Equipping.Ball = ArurHubCosmetics.BallNameMap[ArurHubData.currentBallSkin]
+                    end
+                    if ArurHubData.ballAuraEnabled and ArurHubCosmetics.BallAuraNameMap[ArurHubData.currentBallAura] then
+                        PlayerData.storedData.Equipping.Aura = ArurHubCosmetics.BallAuraNameMap[ArurHubData.currentBallAura]
+                    end
+                    if ArurHubData.ballTrailEnabled and ArurHubCosmetics.BallTrailNameMap[ArurHubData.currentBallTrail] then
+                        PlayerData.storedData.Equipping.Trail = ArurHubCosmetics.BallTrailNameMap[ArurHubData.currentBallTrail]
+                    end
+                end
+                if PlayerData.storedData and PlayerData.storedData.Config then
+                    if ArurHubData.ballSkinEnabled then
+                        PlayerData.storedData.Config.Toggle_BallSkins = true
+                    end
+                    if ArurHubData.ballAuraEnabled then
+                        PlayerData.storedData.Config.Toggle_BallAuras = true
+                    end
+                    if ArurHubData.ballTrailEnabled then
+                        PlayerData.storedData.Config.Toggle_BallTrails = true
+                    end
+                    if ArurHubData.bodyAuraEnabled then
+                        PlayerData.storedData.Config.Toggle_Auras = true
+                    end
+                end
+            end)
+        end
+    end)
+
+
+
+
+end)
+
+
+
+
+
+-- [ UI INITIALIZATION ] --
+local function saveMobilePos(key, pos)
+    pcall(function()
+        local hs = game:GetService("HttpService")
+        local s, d = pcall(readfile, "arurhub_mobile_pos.json")
+        local t = (s and typeof(hs:JSONDecode(d)) == "table") and hs:JSONDecode(d) or {}
+        t[key] = {X = pos.X.Scale, Y = pos.Y.Scale, OffX = pos.X.Offset, OffY = pos.Y.Offset}
+        writefile("arurhub_mobile_pos.json", hs:JSONEncode(t))
+    end)
+end
+
+local function loadMobilePos(key)
+    local s, d = pcall(readfile, "arurhub_mobile_pos.json")
+    if s then
+        local t = game:GetService("HttpService"):JSONDecode(d)
+        if typeof(t) == "table" and t[key] then
+            return UDim2.new(t[key].X, t[key].OffX, t[key].Y, t[key].OffY)
+        end
+    end
+    return nil
+end
+
+function ArurHubData.createMobileToggle(name, uiName, dataKey, toggleObj, positionOffset)
+    local stateKey = "mobile_" .. uiName:lower() .. "_gui"
+    local mobileGui, mobileBtn, heartbeat
+    
+    return function(state)
+        if state then
+            if not isMobile then
+                ArurHubData.SendNotification('Mobile only feature.', 3, Color3.fromRGB(220, 40, 70))
+                return
+            end
+
+            local existing = playerGui:FindFirstChild(stateKey)
+            if existing then existing:Destroy() end
+
+            mobileGui = Instance.new('ScreenGui')
+            mobileGui.Name = stateKey
+            mobileGui.ResetOnSpawn = false
+            mobileGui.Parent = playerGui
+
+            -- Pill button
+            mobileBtn = Instance.new('TextButton')
+            mobileBtn.Name            = 'ToggleButton'
+            mobileBtn.Size            = UDim2.fromOffset(110, 36)
+            mobileBtn.Position        = loadMobilePos(stateKey) or UDim2.new(0.9, -55, 0.2, positionOffset)
+            mobileBtn.AnchorPoint     = Vector2.new(0.5, 0.5)
+            mobileBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+            mobileBtn.BorderSizePixel = 0
+            mobileBtn.AutoButtonColor = false
+            mobileBtn.Text            = ''
+            mobileBtn.Active          = true
+            mobileBtn.Draggable       = true
+            mobileBtn.Parent          = mobileGui
+
+            Instance.new('UICorner', mobileBtn).CornerRadius = UDim.new(1, 0)
+
+            -- Outer glow stroke (starts red)
+            local btnStroke = Instance.new('UIStroke', mobileBtn)
+            btnStroke.Thickness   = 1.5
+            btnStroke.Color       = Color3.fromRGB(220, 50, 80)
+            btnStroke.Transparency = 0.2
+
+            -- Status dot
+            local dot = Instance.new('Frame', mobileBtn)
+            dot.Name             = 'Dot'
+            dot.Size             = UDim2.fromOffset(7, 7)
+            dot.Position         = UDim2.new(0, 10, 0.5, 0)
+            dot.AnchorPoint      = Vector2.new(0, 0.5)
+            dot.BackgroundColor3 = Color3.fromRGB(220, 50, 80)
+            dot.BorderSizePixel  = 0
+            Instance.new('UICorner', dot).CornerRadius = UDim.new(1, 0)
+
+            -- Label
+            local lbl = Instance.new('TextLabel', mobileBtn)
+            lbl.Size                  = UDim2.new(1, -26, 1, 0)
+            lbl.Position              = UDim2.new(0, 22, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.TextColor3            = Color3.fromRGB(220, 220, 230)
+            lbl.Font                  = Enum.Font.GothamBold
+            lbl.TextSize              = 11
+            lbl.Text                  = name
+            lbl.TextXAlignment        = Enum.TextXAlignment.Left
+            lbl.TextTruncate          = Enum.TextTruncate.AtEnd
+
+            mobileBtn.MouseButton1Click:Connect(function()
+                if toggleObj then
+                    toggleObj.set(not ArurHubData[dataKey])
+                end
+            end)
+
+            mobileBtn.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    saveMobilePos(stateKey, mobileBtn.Position)
+                end
+            end)
+
+            heartbeat = run_service.RenderStepped:Connect(function()
+                if not mobileBtn or not mobileBtn.Parent then
+                    if heartbeat then heartbeat:Disconnect() end
+                    return
+                end
+                local on = ArurHubData[dataKey]
+                local col = on and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(220, 50, 80)
+                dot.BackgroundColor3  = col
+                btnStroke.Color       = col
+            end)
+
+            ArurHubData.SendNotification(name .. " Mobile UI ON", 2.5, Color3.fromRGB(80, 220, 120))
+        else
+            if heartbeat then heartbeat:Disconnect(); heartbeat = nil end
+            if mobileGui then mobileGui:Destroy(); mobileGui = nil; mobileBtn = nil end
+            ArurHubData.SendNotification(name .. " Mobile UI OFF", 2, Color3.fromRGB(220, 50, 80))
+        end
+    end
+end
+
+local window = library:window({name = "ArurHub", suffix = "", gameInfo = "Hoopz"})
+
+local aimbot_tab = window:tab({name = "Aimbot", tabs = {"Main"}})
+local visuals_tab = window:tab({name = "Visuals", tabs = {"Main"}})
+local player_tab = window:tab({name = "Player", tabs = {"Main"}})
+local ball_tab = window:tab({name = "Ball", tabs = {"Main"}})
+local misc_tab = window:tab({name = "Misc", tabs = {"Main"}})
+
+
+-- AIMBOT TAB (Balanced Layout)
+local aim_col = aimbot_tab:column({size = 0.5})
+pass_col = aimbot_tab:column({size = 0.5})
+local aim_sec = aim_col:section({name = "Aimbot Settings", size = 0.6, default = true})
+pass_sec = pass_col:section({name = "Pass Aimbot", size = 0.3, default = true})
+
+-- [ AIMBOT SECTION ] --
+
+local aim_enabled_toggle
+local aim_keybind
+
+aim_enabled_toggle = aim_sec:toggle({
+    name = "Enable Aimbot",
+    flag = "aim_enabled",
+    type = "toggle",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.AimbotEnabled = v 
+        ArurHubData.SendNotification(v and 'Aimbot Enabled' or 'Aimbot Disabled', 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local aim_settings = aim_enabled_toggle:settings({})
+aim_settings:toggle({
+    name = "Enable Mobile UI",
+    flag = "mobile_aimbot_ui",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = ArurHubData.createMobileToggle("Aimbot", "Aimbot", "AimbotEnabled", aim_enabled_toggle, -60)
+})
+
+aim_keybind = aim_settings:keybind({
+    name = "Keybind",
+    key = Enum.KeyCode.F,
+    mode = "Toggle",
+    linked_toggle = "aim_enabled"
+})
+
+-- [ PASS AIMBOT SECTION ] --
+-- Converted to globals to bypass the Lua 200 chunk limit
+pass_enabled_toggle = pass_sec:toggle({
+    name = "Enable Pass Aimbot",
+    flag = "pass_enabled",
+    type = "toggle",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.PassAimbotEnabled = v 
+        if not v and ArurHubData.PassTargetBillboards then
+            for _, bb in pairs(ArurHubData.PassTargetBillboards) do
+                if bb then bb:Destroy() end
+            end
+            ArurHubData.PassTargetBillboards = {}
+        end
+        ArurHubData.SendNotification(v and 'Pass Aimbot Enabled' or 'Pass Aimbot Disabled', 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+pass_settings = pass_enabled_toggle:settings({})
+
+pass_keybind = pass_settings:keybind({
+    name = "Keybind",
+    key = Enum.KeyCode.K,
+    mode = "Toggle",
+    linked_toggle = "pass_enabled"
+})
+
+pass_settings:slider({
+    name = "Text Size",
+    min = 10, max = 60, default = 24, interval = 1,
+    callback = function(v) ArurHubData.PassESPSize = v end
+})
+
+pass_settings:slider({
+    name = "Prediction Multiplier",
+    min = 0, max = 2, default = 1, interval = 0.01,
+    callback = function(v) ArurHubData.PassPredictionStrength = v end
+})
+
+pass_settings:colorpicker({
+    name = "Text Color",
+    default = Color3.fromRGB(0, 255, 255),
+    callback = function(v) ArurHubData.PassESPColor = v end
+})
+
+pass_settings:toggle({
+    name = "Enable Mobile UI",
+    flag = "mobile_pass_ui",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = ArurHubData.createMobileToggle("Pass Aimbot", "Pass", "PassAimbotEnabled", pass_enabled_toggle, -110)
+})
+
+aim_sec:dropdown({
+    name = "Options",
+    items = {"Low Arc", "High Arc"},
+    default = "Low Arc",
+    callback = function(v) 
+        ArurHubData.AimbotMode = v 
+        notify('Mode set to ' .. v)
+    end
+})
+
+aim_sec:slider({
+    name = "Jump Wait Time",
+    min = 0.05, max = 0.4, default = 0.25, interval = 0.001,
+    callback = function(v) ArurHubData.JumpWaitTime = v end,
+})
+
+aim_sec:toggle({
+    name = "Randomize Wait",
+    type = "checkbox",
+    flag = "randomize_wait_toggle",
+    enabled = false,
+    default = false,
+    seperator = true,
+    callback = function(v) 
+        ArurHubData.RandomizeWait = v 
+        ArurHubData.SendNotification(v and "Random wait enabled" or "Random wait disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+
+aim_sec:toggle({
+    name = "Team Goal Check",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.TeamGoalCheckEnabled = v 
+        ArurHubData.SendNotification(v and "Team Goal Check Enabled" or "Team Goal Check Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local nojump_sec = aim_col:section({name = "No Jump Aimbot", size = 0.3, default = true})
+local nojump_toggle = nojump_sec:toggle({
+    name = "Enable No Jump Aimbot",
+    flag = "nojump_enabled",
+    type = "toggle",
+    enabled = false,
+    default = false,
+    callback = function(v)
+        ArurHubData.NoJumpEnabled = v
+        ArurHubData.SendNotification(v and 'No Jump Aimbot ON' or 'No Jump Aimbot OFF', 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local nojump_mode = nojump_sec:dropdown({
+    name = "Options",
+    flag = "nojump_mode",
+    items = {"Low Arc", "High Arc"},
+    default = "Low Arc",
+    callback = function(v)
+        ArurHubData.NoJumpMode = v
+    end
+})
+
+local nojump_settings = nojump_toggle:settings({})
+nojump_settings:toggle({
+    name = "Enable Mobile UI",
+    flag = "mobile_nojump_ui",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = ArurHubData.createMobileToggle("No Jump", "NoJump", "NoJumpEnabled", nojump_toggle, -160)
+})
+nojump_settings:keybind({
+    name = "Shoot Key",
+    key = Enum.KeyCode.J,
+    mode = "Hold",
+    callback = function(v) if v then task.spawn(ArurHubData.triggerNoJumpShot) end end
+})
+
+local pass_sec = pass_col:section({name = "Passing", default = true})
+
+pass_sec:dropdown({
+    name = "Mode",
+    items = {"Camera", "Character"},
+    default = "Camera",
+    callback = function(v) 
+        selfPassDirection = v 
+    end
+})
+
+local function performSelfPass()
+    if not ArurHubData.HasBall() then
+        notify("You don't have the ball!")
+        return
+    end
+    if not _G.ArurHubMapping then 
+        warn("ARURHUB: No Mapping Found yet! Cannot calculate remote.")
+        return 
+    end
+    
+    notify("Performing Silent Self Pass...")
+    local char = lp.Character
+    local head = char and char:FindFirstChild('Head')
+    if not head then return end
+    
+    local calculatedPower = 85
+    lp:SetAttribute('Power', calculatedPower)
+    
+    local rawDirection = camera.CFrame.LookVector
+    if ArurHubData.SelfPassDirection == "Character" then
+        local root = char:FindFirstChild('HumanoidRootPart')
+        if root then rawDirection = root.CFrame.LookVector end
+    end
+    
+    -- FLATTEN DIRECTION: Ignore Y-tilt of camera/character to maintain consistent arc
+    local horizontalDir = Vector3.new(rawDirection.X, 0, rawDirection.Z).Unit
+    
+    -- MAGIC SELF-PASS TRAJECTORY (0.225 Horizontal / 0.985 Vertical)
+    local d = (horizontalDir * 0.225) + Vector3.new(0, 0.985, 0)
+    d = d.Unit -- Ensure exact vector normalization
+    
+    local p = head.Position
+    -- This perfectly mirrors the 'winning' shot you decoded earlier!
+    
+    local valMap = { X1 = p.X, Y1 = p.Y, Z1 = p.Z, X2 = d.X, Y2 = d.Y, Z2 = d.Z }
+    local finalTable = {}
+    
+    for _, key in ipairs(_G.ArurHubMapping) do
+        table.insert(finalTable, buffer.fromstring(tostring(valMap[key])))
+    end
+
+    local shootRem = replicated_storage.Remotes:FindFirstChild("ShootingEvent")
+    if shootRem then
+        shootRem:FireServer(calculatedPower, finalTable, _G.ArurHubCode)
+    end
+
+end
+
+pass_sec:button({
+    name = "Pass to Self", 
+    callback = performSelfPass
+})
+
+pass_sec:keybind({
+    name = "Self Pass Keybind",
+    default = Enum.KeyCode.O,
+    mode = "Hold", 
+    callback = function(v) if v then performSelfPass() end end
+})
+
+pass_sec:toggle({
+    name = "Mobile Self Pass UI",
+    flag = "mobile_self_pass_ui_enabled",
+    enabled = false,
+    default = false,
+    callback = function(state)
+        if not isMobile then 
+            ArurHubData.SendNotification("Mobile only feature.", 3, Color3.fromRGB(220, 20, 60))
+            return 
+        end
+        ArurHubData.SendNotification(state and "Mobile UI Enabled" or "Mobile UI Disabled", 3, state and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+        if state then
+            local existing = playerGui:FindFirstChild("MobileSelfPassGui")
+            if existing then existing:Destroy() end
+
+            local mobileGui2 = Instance.new("ScreenGui")
+            mobileGui2.Name = "MobileSelfPassGui"
+            mobileGui2.ResetOnSpawn = false
+            mobileGui2.Parent = playerGui
+
+            local selfPassBtn = Instance.new("TextButton")
+            selfPassBtn.Name = "SelfPassButton"
+            selfPassBtn.Size = UDim2.fromOffset(110, 36)
+            selfPassBtn.Position = loadMobilePos("MobileSelfPassGui") or UDim2.new(0.9, -50, 0.2, -20)
+            selfPassBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+            selfPassBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+            selfPassBtn.BorderSizePixel = 0
+            selfPassBtn.AutoButtonColor = false
+            selfPassBtn.Text = ""
+            selfPassBtn.Active = true
+            selfPassBtn.Draggable = true
+            selfPassBtn.Parent = mobileGui2
+
+            Instance.new("UICorner", selfPassBtn).CornerRadius = UDim.new(1, 0)
+
+            local btnStroke = Instance.new("UIStroke", selfPassBtn)
+            btnStroke.Thickness = 1.5
+            btnStroke.Color = Color3.fromRGB(30, 144, 255)
+            btnStroke.Transparency = 0.2
+
+            local dot = Instance.new("Frame", selfPassBtn)
+            dot.Name = "Dot"
+            dot.Size = UDim2.fromOffset(7, 7)
+            dot.Position = UDim2.new(0, 10, 0.5, 0)
+            dot.AnchorPoint = Vector2.new(0, 0.5)
+            dot.BackgroundColor3 = Color3.fromRGB(30, 144, 255)
+            dot.BorderSizePixel = 0
+            Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+
+            local lbl = Instance.new("TextLabel", selfPassBtn)
+            lbl.Name = "Title"
+            lbl.Size = UDim2.new(1, -26, 1, 0)
+            lbl.Position = UDim2.new(0, 22, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.TextColor3 = Color3.fromRGB(220, 220, 230)
+            lbl.Font = Enum.Font.GothamBold
+            lbl.TextSize = 11
+            lbl.Text = "Self Pass"
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.TextTruncate = Enum.TextTruncate.AtEnd
+
+            selfPassBtn.MouseButton1Click:Connect(performSelfPass)
+            
+            selfPassBtn.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    saveMobilePos("MobileSelfPassGui", selfPassBtn.Position)
+                end
+            end)
+        else
+            local existingGui = playerGui:FindFirstChild("MobileSelfPassGui")
+            if existingGui then existingGui:Destroy() end
+        end
+    end
+})
+
+-- RANK & STREAK ICONS OVERHEAD LOGIC
+local StreakIconsEnabled = false
+
+local function removeRankIconGui(player)
+    if rankIconGuis[player] then
+        rankIconGuis[player]:Destroy()
+        rankIconGuis[player] = nil
+    end
+    if rankIconConnections[player] then
+        rankIconConnections[player]:Disconnect()
+        rankIconConnections[player] = nil
+    end
+end
+
+local function createRankIconGui(player)
+    removeRankIconGui(player)
+    if not RankIconsEnabled and not StreakIconsEnabled then return end
+
+    local character = player.Character
+    if not character then return end
+    local head = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
+    if not head then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local nameTag = hrp:FindFirstChild("NameTag")
+    if not nameTag then return end
+    local mainFrame = nameTag:FindFirstChild("MainFrame")
+    if not mainFrame then return end
+
+    local sourceRank = mainFrame:FindFirstChild("RankIcon")
+    local sourceStreak = mainFrame:FindFirstChild("StreakIcon")
+    local sourceStreakLabel = sourceStreak and sourceStreak:FindFirstChild("AmountLabel")
+    
+    local function getStreakAmount()
+        return tonumber(sourceStreakLabel and sourceStreakLabel.Text) or 0
+    end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ArurRankOverhead"
+    billboard.Size = UDim2.new(2, 0, 2, 0)
+    billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+    billboard.AlwaysOnTop = false
+    billboard.LightInfluence = 0
+    billboard.ResetOnSpawn = false
+    billboard.MaxDistance = nameTag.MaxDistance > 0 and nameTag.MaxDistance or 100 -- Distance Clipping
+    billboard.Adornee = head
+    billboard.Parent = hrp
+
+    local container = Instance.new("Frame")
+    container.Name = "MainFrame"
+    container.Size = UDim2.new(1, 0, 1, 0)
+    container.BackgroundTransparency = 1
+    container.Parent = billboard
+
+    local layout = Instance.new("UIListLayout")
+    layout.FillDirection = Enum.FillDirection.Horizontal
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.VerticalAlignment = Enum.VerticalAlignment.Center
+    layout.Padding = UDim.new(0.01, 0) -- Tightened spacing
+    layout.Parent = container
+
+    local function addAspectRatio(obj)
+        local arc = Instance.new("UIAspectRatioConstraint")
+        arc.AspectRatio = 1
+        arc.AspectType = Enum.AspectType.FitWithinMaxSize
+        arc.DominantAxis = Enum.DominantAxis.Height
+        arc.Parent = obj
+    end
+
+    local clonedRank = sourceRank and sourceRank:Clone()
+    if clonedRank then
+        clonedRank.Size = UDim2.new(1, 0, 0.9, 0)
+        addAspectRatio(clonedRank)
+        clonedRank.Parent = container
+        clonedRank.Visible = false
+    end
+
+    local clonedStreak = sourceStreak and sourceStreak:Clone()
+    if clonedStreak then
+        clonedStreak.Size = UDim2.new(1, 0, 0.9, 0)
+        addAspectRatio(clonedStreak)
+        clonedStreak.Parent = container
+        clonedStreak.Visible = false
+        clonedStreak.BackgroundTransparency = 1
+        
+        local amountLabel = clonedStreak:FindFirstChild("AmountLabel")
+        if amountLabel then
+            amountLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+            amountLabel.Position = UDim2.new(0.5, 0, 0.53, 0)
+        end
+    end
+
+    local lastState = ""
+    local function updateLayout()
+        local streakActive = StreakIconsEnabled and sourceStreak ~= nil and getStreakAmount() > 0
+        local rankActive = RankIconsEnabled and sourceRank ~= nil
+        local state = tostring(streakActive) .. tostring(rankActive)
+        
+        if not streakActive and not rankActive then
+            billboard.Enabled = false
+            return
+        end
+        billboard.Enabled = true
+
+        if state ~= lastState then
+            lastState = state
+            if rankActive and streakActive then
+                billboard.Size = UDim2.new(4, 0, 1.5, 0)
+                if clonedRank then clonedRank.Visible = true end
+                if clonedStreak then clonedStreak.Visible = true end
+            elseif rankActive or streakActive then
+                billboard.Size = UDim2.new(1.8, 0, 1.8, 0)
+                if clonedRank then clonedRank.Visible = rankActive end
+                if clonedStreak then clonedStreak.Visible = streakActive end
+            end
+        end
+    end
+
+    updateLayout()
+
+    local conn = game:GetService("RunService").Heartbeat:Connect(function()
+        if not character or not character.Parent then return end
+        
+        if clonedRank and RankIconsEnabled then
+            local sr = mainFrame:FindFirstChild("RankIcon")
+            if sr then clonedRank.Image = sr.Image end
+        end
+        
+        if clonedStreak and StreakIconsEnabled then
+            local ss = mainFrame:FindFirstChild("StreakIcon")
+            if ss then
+                clonedStreak.ImageRectOffset = ss.ImageRectOffset
+                clonedStreak.ImageRectSize = ss.ImageRectSize
+                clonedStreak.Image = ss.Image
+                local al = ss:FindFirstChild("AmountLabel")
+                if al then
+                    local clonedLabel = clonedStreak:FindFirstChild("AmountLabel")
+                    if clonedLabel then clonedLabel.Text = al.Text end
+                end
+            end
+        end
+        
+        updateLayout()
+    end)
+
+    rankIconConnections[player] = conn
+    rankIconGuis[player] = billboard
+end
+
+local function applyRankIcons()
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        if player ~= lp then createRankIconGui(player) end
+    end
+end
+
+local function clearAllRankIcons()
+    for player, _ in pairs(rankIconGuis) do removeRankIconGui(player) end
+    rankIconConnections = {}
+    rankIconGuis = {}
+end
+
+-- VISUALS TAB
+local vis_col1 = visuals_tab:column({size = 0.5})
+local vis_col2 = visuals_tab:column({size = 0.5})
+
+local range_sec = vis_col1:section({name = "Range Indicator", default = true})
+
+local range_toggle = range_sec:toggle({
+    name = "Enable Range Indicator",
+    flag = "range_indicator_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.ShowRange = v 
+        if rangeLabel then rangeLabel.Visible = v end
+        if highlight then highlight.Enabled = v end
+        ArurHubData.SendNotification(v and "Range Indicator Enabled" or "Range Indicator Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local range_settings = range_toggle:settings({})
+range_settings:toggle({
+    name = "Only Show With Aimbot",
+    flag = "only_show_with_aimbot_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = true,
+    callback = function(v) 
+        ArurHubData.OnlyShowWithAimbot = v 
+        ArurHubData.SendNotification(v and "Aimbot-Only Range ON" or "Aimbot-Only Range OFF", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+range_settings:dropdown({
+    name = "Mode",
+    items = {"Outline", "Bottom", "Top"},
+    default = "Outline",
+    callback = function(v) ArurHubData.RangeMode = v end
+})
+
+range_settings:colorpicker({
+    name = "In Range Color",
+    color = Color3.new(0, 1, 0),
+    callback = function(v) ArurHubData.InRangeColor = v end
+})
+
+range_settings:colorpicker({
+    name = "Out of Range Color",
+    color = Color3.new(1, 0, 0),
+    callback = function(v) ArurHubData.OutRangeColor = v end
+})
+
+local function setupRankIconHooks()
+    if _G.rankIconHookSet then return end
+    _G.rankIconHookSet = true
+    
+    local function hookPlayer(player)
+        if player == lp then return end
+        player.CharacterAdded:Connect(function()
+            task.wait(1)
+            if RankIconsEnabled or StreakIconsEnabled then createRankIconGui(player) end
+        end)
+    end
+
+    game:GetService("Players").PlayerAdded:Connect(hookPlayer)
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        hookPlayer(player)
+    end
+end
+
+local overhead_sec = vis_col1:section({name = "Overhead Display", default = true})
+overhead_sec:toggle({
+    name = "Show Rank Icons",
+    flag = "rank_icons_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v)
+        RankIconsEnabled = v
+        clearAllRankIcons()
+        if v or StreakIconsEnabled then
+            setupRankIconHooks()
+            applyRankIcons()
+        end
+        ArurHubData.SendNotification(v and "Rank Icons Enabled" or "Rank Icons Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+overhead_sec:toggle({
+    name = "Show Streak Icons",
+    flag = "streak_icons_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v)
+        StreakIconsEnabled = v
+        clearAllRankIcons()
+        if v or RankIconsEnabled then
+            setupRankIconHooks()
+            applyRankIcons()
+        end
+        ArurHubData.SendNotification(v and "Streak Icons Enabled" or "Streak Icons Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local traj_sec = vis_col2:section({name = "Shot Trajectory", default = true})
+local traj_toggle = traj_sec:toggle({
+    name = "Enable Trajectory",
+    flag = "trajectory_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.TrajectoryEnabled = v 
+        ArurHubData.SendNotification(v and "Trajectory Enabled" or "Trajectory Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local traj_settings = traj_toggle:settings({})
+traj_settings:toggle({
+    name = "Only Show With Aimbot",
+    flag = "only_show_traj_with_aimbot_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = true,
+    callback = function(v) 
+        ArurHubData.OnlyShowTrajWithAimbot = v 
+        ArurHubData.SendNotification(v and "Aimbot-Only Traj ON" or "Aimbot-Only Traj OFF", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+traj_settings:colorpicker({
+    name = "Line Color",
+    color = Color3.fromRGB(0, 255, 0),
+    callback = function(v) ArurHubData.TrajectoryColor = v end
+})
+
+traj_settings:dropdown({
+    name = "Mode",
+    items = {"Dots", "Line"},
+    default = "Line",
+    callback = function(v) ArurHubData.TrajectoryMode = v end
+})
+
+traj_settings:slider({
+    name = "Transparency",
+    min = 0, max = 1, default = 0, interval = 0.01,
+    callback = function(v) ArurHubData.TrajectoryTransparency = v end
+})
+
+traj_settings:slider({
+    name = "Stay Duration",
+    min = 0, max = 5, default = 1.5, interval = 0.1,
+    callback = function(v) ArurHubData.TrajectoryStayDuration = v end
+})
+
+traj_settings:toggle({
+    name = "Stop exactly at Hoop",
+    flag = "trajectory_stop_at_hoop",
+    type = "checkbox",
+    enabled = false,
+    default = true,
+    callback = function(v) 
+        ArurHubData.TrajectoryStopAtHoop = v 
+    end
+})
+
+traj_settings:dropdown({
+    name = "Beam Style",
+    items = {"Plain", "White Glow", "Pink/Purple", "Blue Electric", "Dark Blue", "Green", "Orange", "Cyan"},
+    default = "Plain",
+    callback = function(v)
+        ArurHubData.applyBeamStyle(v)
+        ArurHubData.SendNotification("Beam Style: " .. v, 3, Color3.fromRGB(0, 170, 255))
+    end
+})
+
+local stats_sec = vis_col2:section({name = "Shooting Statistics", default = true})
+local stats_toggle = stats_sec:toggle({
+    name = "Enable Stats HUD",
+    flag = "stats_hud_enabled",
+    type = "checkbox",
+    callback = function(v) 
+        ShootingStatsEnabled = v 
+        statsGui.Enabled = v
+        if v then ArurHubData.updateStatsUI() end
+    end
+})
+
+local stats_settings = stats_toggle:settings({})
+stats_settings:toggle({
+    name = "Only This Session",
+    flag = "stats_session_only",
+    type = "checkbox",
+    default = true,
+    callback = function(v) 
+        SessionOnlyStats = v 
+        ArurHubData.updateStatsUI()
+    end
+})
+
+-- BALL TAB (Balanced Layout)
+local ball_col1 = ball_tab:column({size = 0.5})
+local ball_col2 = ball_tab:column({size = 0.5})
+local mag_sec = ball_col1:section({name = "Magnets", default = true})
+
+local full_mag_toggle
+local full_mag_keybind
+full_mag_toggle = mag_sec:toggle({
+    name = "Full Magnet Ball",
+    flag = "full_magnet_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.MagnetEnabled = v 
+        ArurHubData.SendNotification(v and 'Full Magnet Enabled' or 'Full Magnet Disabled', 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+local full_mag_settings = full_mag_toggle:settings({})
+full_mag_settings:toggle({
+    name = "Enable Mobile UI",
+    flag = "mobile_full_mag_ui",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = ArurHubData.createMobileToggle("Full Magnet", "FullMagnet", "MagnetEnabled", full_mag_toggle, -15)
+})
+
+full_mag_keybind = full_mag_settings:keybind({
+    name = "Keybind",
+    key = Enum.KeyCode.N,
+    mode = "Toggle",
+    linked_toggle = "full_magnet_enabled"
+})
+mag_sec:slider({
+    name = "Max Distance",
+    min = 0, max = 50, default = 0, interval = 1,
+    callback = function(v) ArurHubData.MaxMagnetDistance = v end
+})
+
+local shot_mag_toggle
+local shot_mag_keybind
+shot_mag_toggle = mag_sec:toggle({
+    name = "Shot Magnet Ball",
+    flag = "shot_magnet_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.ShotMagnetEnabled = v 
+        ArurHubData.SendNotification(v and 'Shot Magnet Enabled' or 'Shot Magnet Disabled', 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+local shot_mag_settings = shot_mag_toggle:settings({})
+shot_mag_settings:toggle({
+    name = "Enable Mobile UI",
+    flag = "mobile_shot_mag_ui",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = ArurHubData.createMobileToggle("Shot Magnet", "ShotMagnet", "ShotMagnetEnabled", shot_mag_toggle, 30)
+})
+
+shot_mag_keybind = shot_mag_settings:keybind({
+    name = "Keybind",
+    key = Enum.KeyCode.U,
+    mode = "Toggle",
+    linked_toggle = "shot_magnet_enabled"
+})
+mag_sec:slider({
+    name = "Max Distance",
+    min = 0, max = 150, default = 0, interval = 1,
+    callback = function(v) ArurHubData.ShotMagMaxDistance = v end
+})
+
+local reach_sec = ball_col2:section({name = "Reach", default = true})
+local reach_enabled_toggle = reach_sec:toggle({
+    name = "Reach Enabled",
+    flag = "reach_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) ArurHubData.ReachEnabled = v 
+        ArurHubData.SendNotification(v and 'Reach Enabled' or 'Reach Disabled', 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local reach_settings = reach_enabled_toggle:settings({})
+reach_settings:toggle({
+    name = "Enable Mobile UI",
+    flag = "mobile_reach_ui",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = ArurHubData.createMobileToggle("Reach", "Reach", "ReachEnabled", reach_enabled_toggle, 75)
+})
+reach_sec:slider({
+    name = "Reach Distance",
+    min = 0, max = 5, default = 0, interval = 1,
+    callback = function(v) ArurHubData.ReachDistance = v end
+})
+
+-- PLAYER TAB (Balanced Layout)
+local plr_col1 = player_tab:column({size = 0.5})
+local plr_col2 = player_tab:column({size = 0.5})
+local walk_sec = plr_col1:section({name = "Movement", default = true})
+
+local speed_toggle
+local speed_keybind
+
+speed_toggle = walk_sec:toggle({
+    name = "Speed Enabled",
+    flag = "speed_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.SpeedBypassEnabled = v 
+        ArurHubData.SendNotification(v and 'Speed Enabled' or 'Speed Disabled', 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+local speed_settings = speed_toggle:settings({})
+speed_settings:toggle({
+    name = "Enable Mobile UI",
+    flag = "mobile_speed_ui",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = ArurHubData.createMobileToggle("Speed", "Speed", "SpeedBypassEnabled", speed_toggle, 120)
+})
+
+speed_keybind = speed_settings:keybind({
+    name = "Keybind",
+    key = Enum.KeyCode.X,
+    mode = "Toggle",
+    linked_toggle = "speed_enabled"
+})
+
+walk_sec:slider({
+    name = "Speed",
+    min = 16, max = 22, default = 16, interval = 0.5,
+    callback = function(v) ArurHubData.SpeedGain = ((v - 16) / 6) * 6 end
+})
+
+walk_sec:toggle({
+    name = "Anti Travel",
+    flag = "anti_travel_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.AntiTravelEnabled = v 
+        ArurHubData.SendNotification(v and 'Anti Travel Enabled' or 'Anti Travel Disabled', 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local dunk_sec = plr_col1:section({name = "Auto Dunk", default = true})
+
+dunk_sec:toggle({
+    name = "Enable Auto Dunk",
+    flag = "auto_dunk_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.AutoDunkEnabled = v 
+        ArurHubData.SendNotification(v and "Auto Dunk Enabled" or "Auto Dunk Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local lock_sec = plr_col2:section({name = "Player Lock-on", default = true})
+local lock_toggle
+local lock_keybind
+local lockRejecting = false
+lock_toggle = lock_sec:toggle({
+    name = "Lock Onto Player",
+    flag = "lock_enabled",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v)
+        if lockRejecting then return end
+        if v and ArurHubData.HasBall() then
+            ArurHubData.SendNotification('Cannot lock while holding the ball.', 3, Color3.fromRGB(255, 50, 50))
+            lockRejecting = true
+            lock_toggle.set(false)
+            if lock_keybind then lock_keybind.set(false) end
+            lockRejecting = false
+            return
+        end
+        ArurHubData.LockToPlayer = v
+        if v then
+            ArurHubData.LockedPlayer = findClosest()
+            ArurHubData.SendNotification(ArurHubData.LockedPlayer and 'Lock Enabled on ' .. ArurHubData.LockedPlayer.Name or 'No players nearby', 3, ArurHubData.LockedPlayer and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+        else
+            ArurHubData.LockedPlayer = nil
+            ArurHubData.SendNotification('Lock Disabled', 3, Color3.fromRGB(255, 0, 0))
+        end
+    end
+})
+
+local lock_settings = lock_toggle:settings({})
+lock_keybind = lock_settings:keybind({
+    name = "Keybind",
+    key = Enum.KeyCode.L,
+    mode = "Toggle",
+    linked_toggle = "lock_enabled"
+})
+
+-- Mobile Lock UI Toggle
+local mobileGui
+local mobileBtn
+local heartbeatLock
+lock_sec:toggle({
+    name = "Mobile Lock UI",
+    flag = "mobile_lock_ui_enabled",
+    enabled = false,
+    default = false,
+    callback = function(state)
+        if state then
+            if not isMobile then
+                ArurHubData.SendNotification('Mobile only feature.', 3, Color3.fromRGB(220, 20, 60))
+                return
+            end
+
+            local existing = playerGui:FindFirstChild('MobileLockGui')
+            if existing then existing:Destroy() end
+
+            mobileGui = Instance.new('ScreenGui')
+            mobileGui.Name = 'MobileLockGui'
+            mobileGui.ResetOnSpawn = false
+            mobileGui.Parent = playerGui
+
+            mobileBtn = Instance.new('TextButton')
+            mobileBtn.Name = 'LockButton'
+            mobileBtn.Size = UDim2.fromOffset(110, 36)
+            mobileBtn.Position = loadMobilePos("MobileLockGui") or UDim2.new(0.9, -50, 0.1, -20)
+            mobileBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+            mobileBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+            mobileBtn.BorderSizePixel = 0
+            mobileBtn.AutoButtonColor = false
+            mobileBtn.Text = ''
+            mobileBtn.Active = true
+            mobileBtn.Draggable = true
+            mobileBtn.Parent = mobileGui
+
+            Instance.new("UICorner", mobileBtn).CornerRadius = UDim.new(1, 0)
+
+            local btnStroke = Instance.new("UIStroke", mobileBtn)
+            btnStroke.Thickness = 1.5
+            btnStroke.Color = Color3.fromRGB(220, 50, 80)
+            btnStroke.Transparency = 0.2
+
+            local dot = Instance.new("Frame", mobileBtn)
+            dot.Name = "Dot"
+            dot.Size = UDim2.fromOffset(7, 7)
+            dot.Position = UDim2.new(0, 10, 0.5, 0)
+            dot.AnchorPoint = Vector2.new(0, 0.5)
+            dot.BackgroundColor3 = Color3.fromRGB(220, 50, 80)
+            dot.BorderSizePixel = 0
+            Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+
+            local lbl = Instance.new("TextLabel", mobileBtn)
+            lbl.Name = "Title"
+            lbl.Size = UDim2.new(1, -26, 1, 0)
+            lbl.Position = UDim2.new(0, 22, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.TextColor3 = Color3.fromRGB(220, 220, 230)
+            lbl.Font = Enum.Font.GothamBold
+            lbl.TextSize = 11
+            lbl.Text = "Lock On"
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.TextTruncate = Enum.TextTruncate.AtEnd
+            
+            mobileBtn.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    saveMobilePos("MobileLockGui", mobileBtn.Position)
+                end
+            end)
+
+            mobileBtn.MouseButton1Click:Connect(function()
+                if ArurHubData.HasBall() then
+                    ArurHubData.SendNotification('Cannot toggle Lock while you have the ball!', 3, Color3.fromRGB(255, 165, 0))
+                    return
+                end
+                lock_toggle.set(not ArurHubData.LockToPlayer)
+            end)
+
+            heartbeatLock = run_service.RenderStepped:Connect(function()
+                if not mobileBtn or not mobileBtn.Parent then
+                    heartbeatLock:Disconnect()
+                    return
+                end
+                if ArurHubData.HasBall() then
+                    if ArurHubData.LockToPlayer then lock_toggle.set(false) end
+                    dot.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+                    btnStroke.Color = Color3.fromRGB(255, 165, 0)
+                    lbl.Text = 'Locked (Ball)'
+                    mobileBtn.Active = false
+                else
+                    lbl.Text = 'Lock On'
+                    mobileBtn.Active = true
+                    local col = ArurHubData.LockToPlayer and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(220, 50, 80)
+                    dot.BackgroundColor3 = col
+                    btnStroke.Color = col
+                end
+            end)
+        else
+            if heartbeatLock then heartbeatLock:Disconnect(); heartbeatLock = nil end
+            if mobileGui then mobileGui:Destroy(); mobileGui = nil; mobileBtn = nil end
+        end
+    end
+})
+
+
+-- Prediction Amount
+lock_sec:slider({
+    name = "Prediction Amount",
+    min = 0, max = 2, default = 1, interval = 0.01,
+    callback = function(v) ArurHubData.PredictionOffset = v end
+})
+
+local hud_toggle = lock_sec:toggle({
+    name = "Show Target HUD",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.TargetHUDEnabled = v
+        if not v then ArurHubData.animateTargetHUD(false) end
+    end
+})
+
+local hud_settings = hud_toggle:settings({})
+
+hud_settings:colorpicker({
+    name = "Accent Color",
+    default = ArurHubData.TargetHUDAccentColor,
+    callback = function(v) ArurHubData.TargetHUDAccentColor = v end
+})
+
+hud_settings:colorpicker({
+    name = "Distance Color",
+    default = ArurHubData.TargetHUDDistanceColor,
+    callback = function(v) ArurHubData.TargetHUDDistanceColor = v end
+})
+
+hud_settings:toggle({
+    name = "Use Display Name",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) ArurHubData.TargetHUDDisplayName = v end
+})
+
+hud_settings:slider({
+    name = "Scale",
+    min = 0.5, max = 2.0, default = 1.0, interval = 0.05,
+    callback = function(v) 
+        ArurHubData.TargetHUDScale = v
+        ArurHubData.updateTargetHUDScale()
+    end
+})
+
+-- [ DESYNC FEATURE (RAKNET) ] --
+local isRaknetSupported = (typeof(raknet) == "table" and raknet.add_send_hook ~= nil)
+
+local desync_sec = plr_col2:section({name = "Desync", default = true})
+
+if isRaknetSupported then
+    local raknetHookErred = false
+    local desyncHookActive = false
+
+    local function myLagHook(packet)
+        if raknetHookErred then return end
+        local success, err = pcall(function()
+            local bytes = packet.AsArray
+            if type(bytes) == "table" and bytes[1] == 0x1B and #bytes >= 5 then
+                bytes[2] = 255 -- FF
+                bytes[3] = 255
+                bytes[4] = 255
+                bytes[5] = 255
+                packet:SetData(bytes)
+            end
+        end)
+        
+        if not success then
+            raknetHookErred = true
+            pcall(function() raknet.remove_send_hook(myLagHook) end)
+            task.spawn(function()
+                ArurHubData.SendNotification("Desync Hook Failure (Killed): " .. tostring(err), 10, Color3.fromRGB(255, 50, 50))
+                ArurHubData.DesyncEnabled = false
+                if desync_toggle then desync_toggle:set(false) end
+            end)
+        end
+    end
+
+    local desync_toggle
+    local desyncHookActive = false
+    local isReverting = false
+
+    desync_toggle = desync_sec:toggle({
+        name = "Enable Desync (Ban Risk)",
+        flag = "desync_enabled",
+        type = "checkbox",
+        enabled = false,
+        default = false,
+        callback = function(v)
+            if isReverting then return end
+            
+            if v then
+                if raknetHookErred then
+                    isReverting = true
+                    desync_toggle:set(false)
+                    isReverting = false
+                    ArurHubData.SendNotification("Re-execute script to reset failed hook.", 5, Color3.fromRGB(255, 200, 0))
+                    return
+                end
+                
+                local success, err = pcall(function()
+                    if not desyncHookActive then
+                        raknet.add_send_hook(myLagHook)
+                        desyncHookActive = true
+                    end
+                end)
+                
+                if success then
+                    ArurHubData.DesyncEnabled = true
+                    ArurHubData.SendNotification("Desync Enabled", 3, Color3.fromRGB(0, 255, 0))
+                else
+                    ArurHubData.DesyncEnabled = false
+                    isReverting = true
+                    desync_toggle:set(false)
+                    isReverting = false
+                    
+                    ArurHubData.SendNotification("Raknet Blocked by Executor.", 7, Color3.fromRGB(255, 50, 50))
+                end
+            else
+                ArurHubData.DesyncEnabled = false
+                if desyncHookActive then
+                    pcall(raknet.remove_send_hook, myLagHook)
+                    desyncHookActive = false
+                end
+                ArurHubData.SendNotification("Desync Disabled", 3, Color3.fromRGB(255, 0, 0))
+            end
+        end
+    })
+
+    desync_toggle:settings({}):keybind({
+        name = "Keybind",
+        key = Enum.KeyCode.Unknown,
+        mode = "Toggle",
+        linked_toggle = "desync_enabled"
+    })
+else
+    desync_sec:button({
+        name = "Raknet Required (Missing)",
+        callback = function()
+            ArurHubData.SendNotification("Desync requires Raknet hooks. Your executor is not compatible.", 5, Color3.fromRGB(255, 100, 100))
+        end
+    })
+end
+
+-- MISC TAB (Balanced Layout)
+local misc_col1 = misc_tab:column({size = 0.5})
+local misc_col2 = misc_tab:column({size = 0.5})
+
+local device_sec = misc_col1:section({name = "Settings", default = true})
+
+device_sec:dropdown({
+    name = "Device",
+    items = {"Mobile", "Desktop"},
+    default = isMobile and "Mobile" or "Desktop",
+    callback = function(v) fireDeviceEvent(v) end
+})
+
+device_sec:toggle({
+    name = "Controller",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        fireDeviceEvent(v and "Gamepad On" or "Gamepad Off")
+        ArurHubData.SendNotification(v and "Controller Enabled" or "Controller Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+device_sec:toggle({
+    name = "Hide Notifications",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.HideNotifications = v
+        if not v then
+            ArurHubData.SendNotification("Notifications Enabled", 3, Color3.fromRGB(0, 255, 0))
+        end
+    end
+})
+
+device_sec:toggle({
+    name = "Anti Travel",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.AntiTravelEnabled = v 
+        ArurHubData.SendNotification(v and "Anti Travel Enabled" or "Anti Travel Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local effect_sec = misc_col1:section({name = "Goal Effect", default = true})
+local effect_toggle = effect_sec:toggle({
+    name = "Enable Visual Goal Effect",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.effectEnabled = v
+        pcall(function()
+            local PlayerData = require(game:GetService("ReplicatedStorage").Util.PlayerData)
+            local equippedName = PlayerData.Get("Equipping", "Effect")
+            if equippedName then
+                local obj = game:GetService("ReplicatedStorage").ShopItems.Effect:FindFirstChild(equippedName)
+                if obj then
+                    if not obj:GetAttribute("OriginalValue") then
+                        obj:SetAttribute("OriginalValue", obj.Value)
+                    end
+                    obj.Value = v and ArurHubData.currentEffect or obj:GetAttribute("OriginalValue")
+                end
+            end
+        end)
+        ArurHubData.SendNotification(v and "Goal Effect Enabled" or "Goal Effect Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+effect_toggle:settings({}):dropdown({
+    name = "Select Effect",
+    items = #ArurHubCosmetics.EffectNames > 0 and ArurHubCosmetics.EffectNames or {"Dragon Portal"},
+    default = "Dragon Portal",
+    scrolling = true,
+    search = true,
+    callback = function(v) 
+        ArurHubData.currentEffect = v 
+        if ArurHubData.effectEnabled then
+            pcall(function()
+                local PlayerData = require(game:GetService("ReplicatedStorage").Util.PlayerData)
+                local equippedName = PlayerData.Get("Equipping", "Effect")
+                if equippedName then
+                    local obj = game:GetService("ReplicatedStorage").ShopItems.Effect:FindFirstChild(equippedName)
+                    if obj then
+                        if not obj:GetAttribute("OriginalValue") then
+                            obj:SetAttribute("OriginalValue", obj.Value)
+                        end
+                        obj.Value = ArurHubData.currentEffect
+                    end
+                end
+            end)
+        end
+    end
+})
+
+local oob_sec = misc_col2:section({name = "OOB", default = true})
+
+local cosmetic_sec = misc_col2:section({name = "Cosmetics", default = true})
+
+cosmetic_sec:toggle({
+    name = "Enable Visual Ball Skin",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.ballSkinEnabled = v
+        if v then applyBallSkinNative() end
+        syncCurrentBall()
+        ArurHubData.SendNotification(v and "Ball Skin Enabled" or "Ball Skin Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+}):settings({}):dropdown({
+    name = "Select Skin",
+    items = #ArurHubCosmetics.BallNames > 0 and ArurHubCosmetics.BallNames or {"Standard"},
+    default = #ArurHubCosmetics.BallNames > 0 and ArurHubCosmetics.BallNames[1] or "Standard",
+    scrolling = true,
+    search = true,
+    callback = function(v) 
+        ArurHubData.currentBallSkin = v 
+        if ArurHubData.ballSkinEnabled then applyBallSkinNative() end
+        syncCurrentBall()
+    end
+})
+
+cosmetic_sec:toggle({
+    name = "Enable Visual Ball Aura",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.ballAuraEnabled = v
+        if v then applyBallAuraNative() end
+        syncCurrentBall()
+        ArurHubData.SendNotification(v and "Ball Aura Enabled" or "Ball Aura Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+}):settings({}):dropdown({
+    name = "Select Aura",
+    items = #ArurHubCosmetics.BallAuraNames > 0 and ArurHubCosmetics.BallAuraNames or {"Standard"},
+    default = #ArurHubCosmetics.BallAuraNames > 0 and ArurHubCosmetics.BallAuraNames[1] or "Standard",
+    scrolling = true,
+    search = true,
+    callback = function(v) 
+        ArurHubData.currentBallAura = v 
+        if ArurHubData.ballAuraEnabled then applyBallAuraNative() end
+        syncCurrentBall()
+    end
+})
+
+local ball_trail_toggle = cosmetic_sec:toggle({
+    name = "Enable Visual Ball Trail",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.ballTrailEnabled = v
+        if v then applyBallTrailNative() end
+        ArurHubData.SendNotification(v and "Ball Trail Enabled" or "Ball Trail Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+local ball_trail_settings = ball_trail_toggle:settings({})
+
+ball_trail_settings:dropdown({
+    name = "Select Trail",
+    items = #ArurHubCosmetics.BallTrailNames > 0 and ArurHubCosmetics.BallTrailNames or {"Standard"},
+    default = #ArurHubCosmetics.BallTrailNames > 0 and ArurHubCosmetics.BallTrailNames[1] or "Standard",
+    scrolling = true,
+    search = true,
+    callback = function(v) 
+        ArurHubData.currentBallTrail = v 
+        if ArurHubData.ballTrailEnabled then applyBallTrailNative() end
+    end
+})
+
+ball_trail_settings:toggle({
+    name = "Sync Perfect Color with Trail",
+    type = "checkbox",
+    enabled = true,
+    default = true,
+    callback = function(v) 
+        ArurHubData.syncPerfectWithTrail = v
+        ArurHubData.SendNotification(v and "Perfect Sync Enabled" or "Perfect Sync Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+})
+
+cosmetic_sec:toggle({
+    name = "Enable Visual Body Aura",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.bodyAuraEnabled = v
+        refreshBodyAura()
+        ArurHubData.SendNotification(v and "Body Aura Enabled" or "Body Aura Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+}):settings({}):dropdown({
+    name = "Select Aura",
+    items = #ArurHubCosmetics.BodyAuraNames > 0 and ArurHubCosmetics.BodyAuraNames or {"Standard"},
+    default = #ArurHubCosmetics.BodyAuraNames > 0 and ArurHubCosmetics.BodyAuraNames[1] or "Standard",
+    scrolling = true,
+    search = true,
+    callback = function(v) 
+        ArurHubData.currentBodyAura = v 
+        if ArurHubData.bodyAuraEnabled then
+            refreshBodyAura()
+        end
+    end
+})
+
+-- Sync UI with Trail toggle removed as requested
+
+cosmetic_sec:toggle({
+    name = "Custom Perfect Color",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(v) 
+        ArurHubData.useCustomPerfectResult = v
+        ArurHubData.SendNotification(v and "Custom Perfect Color Enabled" or "Custom Perfect Color Disabled", 3, v and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0))
+    end
+}):settings({}):colorpicker({
+    name = "Color",
+    default = Color3.fromRGB(0, 255, 255),
+    callback = function(v) 
+        ArurHubData.perfectResultColor = v 
+    end
+})
+
+-- Removed old visual_tuning section as it was moved to Cosmetics
+
+
+
+
+
+
+local origTouch = {}
+local origWalls = {}
+
+oob_sec:toggle({
+    name = "Anti OOB",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(enabled)
+        local courts = workspace:FindFirstChild('Courts')
+        if not courts then return end
+        if enabled then
+            origTouch = {}
+            for _, court in ipairs(courts:GetChildren()) do
+                local oobFolder = court:FindFirstChild('OOB')
+                if oobFolder then
+                    for _, part in ipairs(oobFolder:GetDescendants()) do
+                        if part:IsA('BasePart') then
+                            origTouch[part] = part.CanTouch
+                            part.CanTouch = false
+                        end
+                    end
+                end
+            end
+            ArurHubData.SendNotification('Anti OOB Enabled', 3, Color3.fromRGB(0, 255, 0))
+        else
+            for part, oldValue in pairs(origTouch) do
+                if part and part.Parent then part.CanTouch = oldValue end
+            end
+            origTouch = {}
+            ArurHubData.SendNotification('Anti OOB Disabled', 3, Color3.fromRGB(255, 0, 0))
+        end
+    end
+})
+
+oob_sec:toggle({
+    name = "Remove OOB Walls",
+    type = "checkbox",
+    enabled = false,
+    default = false,
+    callback = function(enabled)
+        local courts = workspace:FindFirstChild('Courts')
+        if not courts then return end
+        if enabled then
+            origWalls = {}
+            for _, court in ipairs(courts:GetChildren()) do
+                local wallsFolder = court:FindFirstChild('OOB') and court.OOB:FindFirstChild('Walls')
+                if wallsFolder then
+                    for _, part in ipairs(wallsFolder:GetDescendants()) do
+                        if part:IsA('BasePart') then
+                            origWalls[part] = { CanCollide = part.CanCollide }
+                            part.Transparency = 1
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end
+            ArurHubData.SendNotification('Remove OOB Walls Enabled', 3, Color3.fromRGB(0, 255, 0))
+        else
+            for part, props in pairs(origWalls) do
+                if part and part.Parent then part.CanCollide = props.CanCollide end
+            end
+            origWalls = {}
+            ArurHubData.SendNotification('Remove OOB Walls Disabled', 3, Color3.fromRGB(255, 0, 0))
+        end
+    end
+})
+
+-- [ MAIN LOOPS ] --
+-- [ BRAIN STEALER: One-Time Actor Breach on Execute ]
+_G.ArurHubMapping = {"X2", "Y1", "X1", "Y2", "Z2", "Z1"}
+_G.ArurHubCode = "Oh yeah yeah"
+_G.ArurHubBreachSuccess = false
+
+-- [ FAST GC SCANNER ] --
+local function performFastGC()
+    for _, v in pairs(getgc(true)) do
+        if typeof(v) == "function" and islclosure(v) then
+            local success, consts = pcall(debug.getconstants, v)
+            if success and consts and table.find(consts, "FireServer") then
+                local upvals = debug.getupvalues(v)
+                for _, up in pairs(upvals) do
+                    if typeof(up) == "table" and #up == 6 and typeof(up[1]) == "string" and up[1]:match("[XYZ][12]") then
+                        _G.ArurHubMapping = up
+                        for _, sc in pairs(upvals) do
+                            if typeof(sc) == "string" and #sc > 3 and not sc:find("Server") then
+                                _G.ArurHubCode = sc
+                            end
+                        end
+                        _G.ArurHubBreachSuccess = true
+                        return true
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- [ SILENT BACKGROUND ACTOR SCAN ] --
+local function performBackgroundActorScan()
+    local actors = {}
+    local playerGui = lp:FindFirstChild("PlayerGui")
+    if playerGui then
+        for _, obj in ipairs(playerGui:GetDescendants()) do
+            if obj:IsA("Actor") then table.insert(actors, obj) end
+        end
+    end
+    if #actors == 0 then return end
+    
+    local rs = game:GetService("ReplicatedStorage")
+    local dropFolder = rs:FindFirstChild("ArurHubBreachProxy")
+    if not dropFolder then
+        dropFolder = Instance.new("Folder")
+        dropFolder.Name = "ArurHubBreachProxy"
+        dropFolder.Parent = rs
+    end
+    
+    local connection
+    connection = dropFolder.ChildAdded:Connect(function(child)
+        if child:IsA("StringValue") and child.Name:find("BreachData") then
+            if not _G.ArurHubBreachSuccess then
+                local val = child.Value
+                local parts = val:split("|")
+                if #parts == 2 then
+                    _G.ArurHubMapping = parts[1]:split(",")
+                    _G.ArurHubCode = parts[2]
+                    _G.ArurHubBreachSuccess = true
+                    
+                    local lock = Instance.new("StringValue")
+                    lock.Name = "SuccessLock"
+                    lock.Parent = dropFolder
+                end
+            end
+            task.defer(function() pcall(function() child:Destroy() end) end)
+            if _G.ArurHubBreachSuccess and connection then connection:Disconnect() end
+        end
+    end)
+
+    local scannerCode = [[
+        local rs = game:GetService("ReplicatedStorage")
+        local dropFolder = rs:FindFirstChild("ArurHubBreachProxy")
+        if not dropFolder or dropFolder:FindFirstChild("SuccessLock") then return end
+
+        for _, v in pairs(getgc(true)) do
+            if typeof(v) == "function" then 
+                local success, consts = pcall(debug.getconstants, v)
+                if success and consts and table.find(consts, "FireServer") then
+                    local upvals = debug.getupvalues(v)
                     for _, up in pairs(upvals) do
-                        if isMappingTable(up) then
-                            sharedVal.Value = table.concat(up, ",")
+                        if typeof(up) == "table" and #up == 6 and typeof(up[1]) == "string" and up[1]:match("[XYZ][12]") then
+                            if dropFolder:FindFirstChild("SuccessLock") then return end
+
+                            local secretCode = "Oh yeah yeah"
+                            for _, sc in pairs(upvals) do
+                                if typeof(sc) == "string" and #sc > 3 and not sc:find("Server") then secretCode = sc end
+                            end
+                            
+                            local sv = Instance.new("StringValue")
+                            sv.Name = "BreachData_" .. tostring(math.random(1000, 9999))
+                            sv.Value = table.concat(up, ",") .. "|" .. secretCode
+                            pcall(function() sv.Parent = dropFolder end)
                             return
                         end
                     end
                 end
             end
         end
-        print("[Actor] Scanned " .. funcsScanned .. " functions but didn't find mapping.")
-    else
-        print("[Actor] getgc failed or restricted inside actor.")
-    end
-]]
+    ]]
 
-for i, actor in ipairs(actors) do
-    pcall(run_on_actor, actor, scanCode)
+    for i = 1, math.min(#actors, 5) do
+        pcall(run_on_actor, actors[i], scannerCode)
+    end
 end
 
-print("Scanning parallel VMs... wait a moment.")
+-- Execute Scan Systems
+task.spawn(function()
+    local ok = performFastGC()
+    if not ok then
+        performBackgroundActorScan()
+        task.wait(4)
+        if not _G.ArurHubBreachSuccess then
+            task.wait(1)
+            ArurHubData.SendNotification('Breach failed! Using safe fallback aimbot mapping.', 6, Color3.fromRGB(220, 160, 50))
+        end
+    end
+end)
+
+local function onJump()
+    if not ArurHubData.AimbotEnabled or not ArurHubData.HasBall() then return end
+    
+    -- Ensure the one-time breach was successful
+    if not _G.ArurHubMapping then 
+        warn("ARURHUB: No Mapping Found yet! Cannot calculate remote.")
+        return 
+    end
+
+    local waitTime = ArurHubData.RandomizeWait and (math.random(15, 25) / 100) or ArurHubData.JumpWaitTime
+    local bufferTime = 0.05
+
+    -- PHASE 1: JUMP LAUNCH
+    task.wait(waitTime - bufferTime)
+
+    -- PHASE 2: MID-AIR SNAPSHOT (0.20s in)
+    local rimPart, dist = getNearestRim()
+    if not rimPart or dist > 74 then return end
+    
+    local head = lp.Character and lp.Character:FindFirstChild('Head')
+    if not head then return end
+    local root = lp.Character and lp.Character:FindFirstChild('HumanoidRootPart')
+    local vOff = Vector3.zero
+    
+    if root then
+        local tVel = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z)
+        local toRim = (rimPart.Position - root.Position).Unit
+        local rVec = Vector3.new(-toRim.Z, 0, toRim.X) 
+        local fSpeed, sSpeed = tVel:Dot(toRim), tVel:Dot(rVec)
+        local baseOff = (math.abs(fSpeed) > math.abs(sSpeed)) and (fSpeed > 0 and toRim * (0.1 * fSpeed) or toRim * (0.2 * fSpeed)) or (rVec * (0.05 * sSpeed))
+        -- Proximity Damping: Weaken prediction as you get closer to avoid overshooting
+        vOff = baseOff * math.clamp(dist / 90, 0.2, 1.0)
+    end
+    
+    local arcBase = (ArurHubData.AimbotMode == 'Low Arc' and arcLow(dist)) or (ArurHubData.AimbotMode == 'High Arc' and arcHigh(dist)) or arcLow(dist)
+    local arcBonus = waitTime > 0.25 and 5 or 0 -- Effectively 0
+    local arcV = (ArurHubData.AimbotMode == 'Low Arc') and arcBase or (arcBase + arcBonus)
+    local targetP = rimPart.Position + Vector3.new(0, arcV, 0) + vOff
+    local p = head.Position
+    local d = (targetP - p).Unit 
+    
+    local calculatedPower = (ArurHubData.AimbotMode == 'Low Arc' and powerForDistance(dist)) or 85
+    
+    -- PHASE 3: FINAL Apex Completion
+    task.wait(bufferTime)
+
+    lp:SetAttribute('Power', calculatedPower)
+    
+    -- Sync Trajectory (Visual Path)
+    if ArurHubData.TrajectoryEnabled then
+        local p_visual = head.Position + (d * 2.25)
+        local control = ((p_visual + rimPart.Position) / 2) + Vector3.new(0, (arcV * 0.95), 0)
+        
+        local points = {}
+        for i = 0, 30 do
+            local t = i / 30
+            local pos = (1-t)^2*p_visual + 2*(1-t)*t*control + t^2*rimPart.Position
+            table.insert(points, pos)
+        end
+
+        lastShotInfo = {
+            time = tick(), 
+            points = points,
+            mode = ArurHubData.TrajectoryMode, 
+            color = ArurHubData.TrajectoryColor, 
+            trans = ArurHubData.TrajectoryTransparency
+        }
+    end
+
+    -- Construct the payload using the cached map
+    local valMap = { X1 = p.X, Y1 = p.Y, Z1 = p.Z, X2 = d.X, Y2 = d.Y, Z2 = d.Z }
+    local finalTable = {}
+    for _, key in ipairs(_G.ArurHubMapping) do
+        table.insert(finalTable, buffer.fromstring(tostring(valMap[key])))
+    end
+
+    local shootRem = replicated_storage.Remotes:FindFirstChild("ShootingEvent")
+    if shootRem then
+        shootRem:FireServer(calculatedPower, finalTable, _G.ArurHubCode)
+    end
+end
+
+-- [ NO-JUMP AIMBOT ] --
+local NoJumpPowerData = {
+    {14,30},{18,35},{22,40},{26,45},{31,50},{35,55},{40,60},
+    {44,65},{48,70},{56,75},{61,80},{68,85}
+}
+local NoJumpArcData = {
+    {8,15},{13,8},{14,6},{16,10},{18,8},{19,14},{22,12},{24,20},{25,14},{26,10},
+    {29,25},{31,18},{33,28},{35,20},{38,35},{40,28},{44,36},{48,45},
+    {50,58},{54,50},{56,40},{58,60},{61,50},{63,68},{64,60},{66,55},{67,50},{68,45}
+}
+local NoJumpHighPowerData = {
+    {68,85}
+}
+local NoJumpHighArcData = {
+    {8,110},{13,109},{16,108},{19,107},{22,106},{26,105},{29,104},{31,102},
+    {33,100},{35,98},{38,96},{40,94},{44,92},{48,88},{50,86},{54,83},
+    {56,80},{58,75},{61,71},{63,68},{64,62},{66,55},{67,40},{68,37}
+}
+local function noJumpPower(d)
+    local targetTable = (ArurHubData.NoJumpMode == "High Arc") and NoJumpHighPowerData or NoJumpPowerData
+    for _, v in ipairs(targetTable) do if d <= v[1] then return v[2] end end
+    return targetTable[#targetTable][2]
+end
+local function noJumpArc(d)
+    local targetTable = (ArurHubData.NoJumpMode == "High Arc") and NoJumpHighArcData or NoJumpArcData
+    for _, v in ipairs(targetTable) do if d < v[1] then return v[2] end end
+    return targetTable[#targetTable][2]
+end
+
+function ArurHubData.triggerNoJumpShot()
+    if not ArurHubData.NoJumpEnabled then return end
+    if not ArurHubData.HasBall() then return end
+    if not _G.ArurHubMapping then
+        warn("ARURHUB: No Mapping Found yet! Cannot calculate remote.")
+        return
+    end
+
+    local rimPart, dist = getNearestRim()
+    if not rimPart or dist > 68 then return end
+
+    local power = noJumpPower(dist)
+    local arc   = noJumpArc(dist)
+
+    local head = lp.Character and lp.Character:FindFirstChild("Head")
+    if not head then return end
+    local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+
+    local arcV = arc
+    local vOff = Vector3.zero
+    if root then
+        local tVel = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z)
+        local toRim = (rimPart.Position - root.Position).Unit
+        local rVec = Vector3.new(-toRim.Z, 0, toRim.X)
+        local fSpeed = tVel:Dot(toRim)
+        local sSpeed = tVel:Dot(rVec)
+
+        local fMult
+        if ArurHubData.NoJumpMode == "High Arc" then
+            -- High Arc: Forward (needs tiny bit lower -> 0.08), Backward (needs higher -> 0.05)
+            fMult = (fSpeed > 0) and 0.08 or 0.05
+        else
+            -- Low Arc: Forward (too low -> lower mult), Backward (fine)
+            fMult = (fSpeed > 0) and 0.03 or 0.05
+        end
+
+        -- Forward/Backward affects arc height
+        arcV = arcV - (fSpeed * fMult)
+
+        -- Side-to-Side affects horizontal target position (vOff)
+        vOff = rVec * (sSpeed * 0.1)
+    end
+
+    local p = head.Position
+    local targetP = rimPart.Position + Vector3.new(0, arcV, 0) + vOff
+    local d = (targetP - p).Unit
+
+    -- Store for trajectory display
+    if ArurHubData.TrajectoryEnabled then
+        local p_visual = p + (d * 2.25)
+        local control = ((p_visual + rimPart.Position + vOff) / 2) + Vector3.new(0, arcV * 0.95, 0)
+        local points = {}
+        for i = 0, 30 do
+            local t = i / 30
+            points[i+1] = (1-t)^2*p_visual + 2*(1-t)*t*control + t^2*(rimPart.Position + vOff)
+        end
+        lastShotInfo = {
+            time  = tick(),
+            points = points,
+            mode  = ArurHubData.TrajectoryMode,
+            color = ArurHubData.TrajectoryColor,
+            trans = ArurHubData.TrajectoryTransparency
+        }
+    end
+
+    lp:SetAttribute('Power', power)
+    local valMap = { X1 = p.X, Y1 = p.Y, Z1 = p.Z, X2 = d.X, Y2 = d.Y, Z2 = d.Z }
+    local finalTable = {}
+    for _, key in ipairs(_G.ArurHubMapping) do
+        table.insert(finalTable, buffer.fromstring(tostring(valMap[key])))
+    end
+    local shootRem = replicated_storage.Remotes:FindFirstChild("ShootingEvent")
+    if shootRem then
+        shootRem:FireServer(power, finalTable, _G.ArurHubCode)
+    end
+end
+
+if _G.aimbotConnection then _G.aimbotConnection:Disconnect() end
+_G.aimbotConnection = lp.CharacterAdded:Connect(function(c)
+    local h = c:WaitForChild('Humanoid', 5)
+    if h then h.Jumping:Connect(onJump) end
+end)
+if lp.Character then
+    local h = lp.Character:FindFirstChild('Humanoid')
+    if h then h.Jumping:Connect(onJump) end
+end
+
+-- Hook Team Goal Check watcher: fires when ball is picked up
+task.spawn(function()
+    local function hookChar(char)
+        -- Check if basketball already in character
+        local existing = char:FindFirstChild("Basketball")
+        if existing then ArurHubData.watchCurrentGame() end
+        -- Also watch for ball being picked up later
+        char.ChildAdded:Connect(function(child)
+            if child.Name == "Basketball" then
+                ArurHubData.watchCurrentGame()
+                if ArurHubData.ballSkinEnabled or ArurHubData.ballTrailEnabled then
+                    applyBallSkinNative()
+                end
+            end
+        end)
+
+        -- Clear blocked rim when ball is dropped
+        char.ChildRemoved:Connect(function(child)
+            if child.Name == "Basketball" then
+                blockedRim = nil
+                if currentGameConn then currentGameConn:Disconnect(); currentGameConn = nil end
+            end
+        end)
+    end
+    if lp.Character then hookChar(lp.Character) end
+    lp.CharacterAdded:Connect(hookChar)
+end)
+
+local cachedTrajectoryPoints = {}
+
+run_service.RenderStepped:Connect(function()
+    local rimPart, dist = getNearestRim()
+    local maxDist = ArurHubData.IsLateGame and 80 or 74
+    if ArurHubData.NoJumpEnabled and not ArurHubData.AimbotEnabled then
+        maxDist = 68
+    end
+    local inRangeOfHoop = dist <= maxDist
+
+    -- Range Indicator Update
+    if ArurHubData.ShowRange and ArurHubData.HasBall() then
+        local aimActive = ArurHubData.AimbotEnabled or ArurHubData.NoJumpEnabled
+        if ArurHubData.OnlyShowWithAimbot and not aimActive then
+            rangeLabel.Visible = false
+            highlight.Enabled = false
+        else
+            if ArurHubData.RangeMode == 'Outline' then
+                rangeLabel.Visible = false
+                highlight.Enabled = true
+                highlight.OutlineColor = inRangeOfHoop and ArurHubData.InRangeColor or ArurHubData.OutRangeColor
+                highlight.FillColor = inRangeOfHoop and ArurHubData.InRangeColor or ArurHubData.OutRangeColor
+            else
+                highlight.Enabled = false
+                rangeLabel.Visible = true
+                rangeLabel.Text = inRangeOfHoop and 'In Range' or 'Out of Range'
+                rangeLabel.TextColor3 = inRangeOfHoop and ArurHubData.InRangeColor or ArurHubData.OutRangeColor
+                rangeLabel.AnchorPoint = Vector2.new(0.5, ArurHubData.RangeMode == 'Top' and 0 or 1)
+                rangeLabel.Position = UDim2.new(0.5, 0, ArurHubData.RangeMode == 'Top' and 0.1 or 0.9, 0)
+            end
+        end
+    else
+        rangeLabel.Visible = false
+        highlight.Enabled = false
+    end
+
+    -- Trajectory Update
+    local head = lp.Character and lp.Character:FindFirstChild("Head")
+    local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    local showTraj = ArurHubData.TrajectoryEnabled and ArurHubData.HasBall() and head and rimPart and inRangeOfHoop
+    local aimActive = ArurHubData.AimbotEnabled or ArurHubData.NoJumpEnabled
+    if showTraj and ArurHubData.OnlyShowTrajWithAimbot and not aimActive then
+        showTraj = false
+    end
+
+    local finalPoints = nil
+    local finalColor = ArurHubData.TrajectoryColor
+    local finalTrans = ArurHubData.TrajectoryTransparency
+    local finalMode = ArurHubData.TrajectoryMode
+
+    if showTraj then
+        local arcBaseValue
+        local vOff = Vector3.zero
+
+        if ArurHubData.NoJumpEnabled then
+            arcBaseValue = noJumpArc(dist)
+            if root then
+                local tVel = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z)
+                local toRim = (rimPart.Position - root.Position).Unit
+                local rVec = Vector3.new(-toRim.Z, 0, toRim.X)
+                local fSpeed = tVel:Dot(toRim)
+                local sSpeed = tVel:Dot(rVec)
+
+                local fMult
+                if ArurHubData.NoJumpMode == "High Arc" then
+                    fMult = (fSpeed > 0) and 0.08 or 0.05
+                else
+                    fMult = (fSpeed > 0) and 0.03 or 0.05
+                end
+                arcBaseValue = arcBaseValue - (fSpeed * fMult)
+                vOff = rVec * (sSpeed * 0.1)
+            end
+        else
+            arcBaseValue = (ArurHubData.AimbotMode == 'Low Arc' and arcLow(dist)) or (ArurHubData.AimbotMode == 'High Arc' and arcHigh(dist)) or arcLow(dist)
+            if root then
+                local tVel = Vector3.new(root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z)
+                local toRim = (rimPart.Position - root.Position).Unit
+                local rVec = Vector3.new(-toRim.Z, 0, toRim.X) 
+                local fSpeed = tVel:Dot(toRim)
+                local sSpeed = tVel:Dot(rVec)
+                if math.abs(fSpeed) > math.abs(sSpeed) then
+                    if fSpeed > 0 then vOff = toRim * (-0.2 * fSpeed) else vOff = toRim * (-0.5 * fSpeed) end
+                else
+                    vOff = rVec * (0.1 * sSpeed)
+                end
+            end
+        end
+        
+        local waitTime = ArurHubData.NoJumpEnabled and 0 or (ArurHubData.RandomizeWait and (math.random(15, 25) / 100) or ArurHubData.JumpWaitTime)
+        local arcBonus = (not ArurHubData.NoJumpEnabled) and (waitTime > 0.25 and 5 or 0) or 0
+        local arcV = arcBaseValue + arcBonus
+        
+        local p = head.Position
+        local targetEnd = rimPart.Position
+        local control = ((p + targetEnd) / 2) + Vector3.new(0, arcV * 0.95, 0)
+        
+        table.clear(cachedTrajectoryPoints)
+        local maxT = ArurHubData.TrajectoryStopAtHoop and 1 or 1.25 -- Extend if toggle off
+        for i = 0, 30 do
+            local t = (i / 30) * maxT
+            table.insert(cachedTrajectoryPoints, (1-t)^2*p + 2*(1-t)*t*control + t^2*targetEnd)
+        end
+        finalPoints = cachedTrajectoryPoints
+    elseif ArurHubData.TrajectoryEnabled and (tick() - lastShotInfo.time) < ArurHubData.TrajectoryStayDuration then
+        finalPoints = lastShotInfo.points
+        finalColor = lastShotInfo.color
+        finalTrans = lastShotInfo.trans
+        finalMode = lastShotInfo.mode
+    end
+
+    if finalPoints and #finalPoints > 1 then
+        traj_active = true
+        local style   = BEAM_STYLES[currentBeamStyle] or BEAM_STYLES["Plain"]
+        local isPlain = currentBeamStyle == "Plain"
+        local hasParticles = style.particles and #style.particles > 0
+
+        -- Always position dots so particle emitters fire from the right places
+        for i, dot in ipairs(dotPool) do
+            if finalPoints[i] then dot.Position = finalPoints[i] end
+        end
+
+        if finalMode == "Dots" then
+            -- Hide all beam layers
+            for layer = 1, NUM_BEAM_LAYERS do
+                for _, b in ipairs(beamLayers[layer]) do b.Enabled = false end
+            end
+            -- Show dots
+            for i, dot in ipairs(dotPool) do
+                if finalPoints[i] then
+                    dot.Transparency = finalTrans
+                    dot.Color = finalColor
+                else
+                    dot.Transparency = 1
+                end
+            end
+        else -- Line / Beam mode
+            for _, d in ipairs(dotPool) do d.Transparency = 1 end
+            -- Render each active beam layer
+            for layer = 1, NUM_BEAM_LAYERS do
+                local bd = style.beams[layer]
+                local pool = beamLayers[layer]
+                local apool = attLayers[layer]
+                if bd or (isPlain and layer == 1) then
+                    for i = 1, #finalPoints - 1 do
+                        local b    = pool[i]
+                        local atts = apool[i]
+                        if b and atts then
+                            atts[1].WorldPosition = finalPoints[i]
+                            atts[2].WorldPosition = finalPoints[i+1]
+                            if isPlain then
+                                b.Color = ColorSequence.new(finalColor)
+                                b.Transparency = NumberSequence.new(finalTrans)
+                                b.Width0 = 0.4; b.Width1 = 0.4
+                                b.Texture = ""; b.TextureSpeed = 0
+                            end
+                            b.Enabled = true
+                        end
+                    end
+                    for i = #finalPoints, #pool do
+                        if pool[i] then pool[i].Enabled = false end
+                    end
+                else
+                    for _, b in ipairs(pool) do b.Enabled = false end
+                end
+            end
+        end
+
+        -- Enable particles along arc (per dot position)
+        for i, dotPE in ipairs(dotParticleSets) do
+            for p = 1, NUM_PARTICLE_TYPES do
+                local pe = dotPE[p]
+                local pd = hasParticles and style.particles[p]
+                if pd and finalPoints[i] then
+                    pe.Rate    = pd.rate
+                    pe.Enabled = true
+                else
+                    pe.Rate    = 0
+                    pe.Enabled = false
+                end
+            end
+        end
+    else
+        if traj_active then
+            traj_active = false
+            for layer = 1, NUM_BEAM_LAYERS do
+                for _, b in ipairs(beamLayers[layer]) do b.Enabled = false end
+            end
+            for _, d in ipairs(dotPool) do d.Transparency = 1 end
+            -- Kill all particles
+            for _, dotPE in ipairs(dotParticleSets) do
+                for _, pe in ipairs(dotPE) do
+                    pe.Rate = 0; pe.Enabled = false
+                end
+            end
+        end
+    end
+end)
+
+run_service.Heartbeat:Connect(function()
+    local myChar = lp.Character
+    local hum = myChar and myChar:FindFirstChildWhichIsA("Humanoid")
+    local rPart = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
+    if ArurHubData.SpeedBypassEnabled and hum and rPart and hum:GetState() ~= Enum.HumanoidStateType.Dead then
+        local mDir = hum.MoveDirection
+        if mDir.Magnitude > 0 then
+            local cVel = rPart.AssemblyLinearVelocity
+            local horizontalVel = Vector3.new(cVel.X, 0, cVel.Z)
+            local xTra = mDir.Unit * ArurHubData.SpeedGain
+            if horizontalVel.Magnitude < hum.WalkSpeed + ArurHubData.SpeedGain - 1 then
+                rPart.AssemblyLinearVelocity = Vector3.new(xTra.X + cVel.X, cVel.Y, xTra.Z + cVel.Z)
+            end
+        end
+    end
+    -- (Speed Bypass Logic Remains Here)
+end)
+
+-- Player Lock Variables migrated to ArurHubData to save registers
+
+run_service.Heartbeat:Connect(function(dt)
+    if not ArurHubData.LockToPlayer then 
+        if isTargetHUDVisible then ArurHubData.animateTargetHUD(false) end
+        return 
+    end
+    ArurHubData.lockAccum = ArurHubData.lockAccum + dt
+    if ArurHubData.lockAccum < 0.05 then return end -- ~20fps cap
+    ArurHubData.lockAccum = 0
+
+    local myChar = lp.Character
+    local rPart = ArurHubData.pRoot
+    local activeHum = ArurHubData.pHum
+
+    local function disableLock()
+        ArurHubData.LockToPlayer = false
+        ArurHubData.LockedPlayer = nil
+        ArurHubData.animateTargetHUD(false)
+        if not sync_guards.lock then
+            sync_guards.lock = true
+            if lock_toggle then lock_toggle.set(false) end
+            sync_guards.lock = false
+        end
+    end
+
+    if ArurHubData.HasBall() then
+        disableLock()
+    elseif not ArurHubData.LockedPlayer or not ArurHubData.LockedPlayer.Character or not ArurHubData.LockedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        ArurHubData.animateTargetHUD(false)
+        return
+    else
+        local tRoot = ArurHubData.LockedPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if tRoot and rPart and activeHum then
+            local myPos    = rPart.Position
+            local tPosReal = tRoot.Position
+            local realDist = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(tPosReal.X, 0, tPosReal.Z)).Magnitude
+            
+            -- FIX: Prediction decreases gracefully as distance grows, dropping to 0 at ~12 studs.
+            local scaler   = math.clamp(1 - ((realDist - 4) / 8), 0, 1) 
+            local tPos     = tPosReal + (tRoot.Velocity * ArurHubData.PredictionOffset * scaler)
+            local dist     = (Vector2.new(myPos.X, myPos.Z) - Vector2.new(tPos.X, tPos.Z)).Magnitude
+
+            if ArurHubData.TargetHUDEnabled then
+                ArurHubData.updateTargetHUD(ArurHubData.LockedPlayer, realDist)
+            else
+                ArurHubData.animateTargetHUD(false)
+            end
+
+            if math.abs(dist - ArurHubData.FOLLOW_DIST) > ArurHubData.DEAD_ZONE then
+                local dest
+                if realDist > 12 then
+                    -- Direct pursuit when far away
+                    dest = tPosReal
+                else
+                    -- "Danclike" prediction/offset when close
+                    dest = tPos + (tRoot.Velocity.Magnitude > 0.1 and tRoot.Velocity.Unit * ArurHubData.FOLLOW_DIST or Vector3.zero)
+                end
+                activeHum:MoveTo(dest)
+            end
+        end
+    end
+end)
+
+ArurHubData.pRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+ArurHubData.pHum = lp.Character and lp.Character:FindFirstChildWhichIsA("Humanoid")
+lp.CharacterAdded:Connect(function(c) 
+    ArurHubData.pRoot = c:WaitForChild('HumanoidRootPart', 5) 
+    ArurHubData.pHum = c:WaitForChild('Humanoid', 5) 
+end)
+
+-- (Stats HUD moved to top)
+
+-- (Shooting Stats now update via dataEvent networking triggers)
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if ArurHubData.HasBall() or not ArurHubData.pRoot then continue end
+        
+        local now = tick()
+        
+        if ArurHubData.MagnetEnabled then
+            for _, folder in ipairs(workspace:GetChildren()) do
+                if folder.Name == "Basketball" then
+                    for _, ball in ipairs(folder:GetChildren()) do
+                        if ball:IsA("BasePart") and ball.Name == "Ball" and ball:FindFirstChildWhichIsA("TouchTransmitter") then
+                            local d = (ArurHubData.pRoot.Position - ball.Position).Magnitude
+                            if d <= ArurHubData.MaxMagnetDistance then
+                                firetouchinterest(ArurHubData.pRoot, ball, 0)
+                                task.wait(0.01)
+                                firetouchinterest(ArurHubData.pRoot, ball, 1)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if ArurHubData.ShotMagnetEnabled then
+            for _, plr in ipairs(players:GetPlayers()) do
+                if plr ~= lp and plr.Character then
+                    local bFolder = plr.Character:FindFirstChild('Basketball')
+                    if bFolder then
+                        local ball = bFolder:FindFirstChild('Ball')
+                        if ball and ball:IsA('BasePart') and ball:FindFirstChildWhichIsA("TouchTransmitter") then
+                            local d = (ArurHubData.pRoot.Position - ball.Position).Magnitude
+                            if d <= ArurHubData.ShotMagMaxDistance then
+                                firetouchinterest(ArurHubData.pRoot, ball, 0)
+                                task.wait(0.01)
+                                firetouchinterest(ArurHubData.pRoot, ball, 1)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if ArurHubData.ReachEnabled then
+            local dist = math.huge
+            local nearestP = nil
+            local pChar = lp.Character
+            if pChar and pChar:FindFirstChild('Torso') then
+                local mTorso = pChar.Torso
+                for _, v in pairs(players:GetPlayers()) do
+                    if v.Name ~= lp.Name and v.Character and v.Character:FindFirstChild('Basketball') then
+                        local oTorso = v.Character:FindFirstChild('Torso')
+                        if oTorso then
+                            local d = (mTorso.Position - oTorso.Position).Magnitude
+                            if d <= ArurHubData.ReachDistance and d < dist then dist = d; nearestP = v end
+                        end
+                    end
+                end
+            end
+            if nearestP and nearestP.Character then
+                local torso = nearestP.Character:FindFirstChild('Torso')
+                if torso then
+                    local nPart, pDist = getNearestPart(torso)
+                    if nPart and pDist <= ArurHubData.ReachDistance then
+                        local bModel = nearestP.Character:FindFirstChild('Basketball')
+                        if bModel then
+                            local bPart = bModel:FindFirstChildOfClass('Part')
+                            if bPart then firetouchinterest(nPart, bPart, 0); task.wait(0.05); firetouchinterest(nPart, bPart, 1) end
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(0.2)
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if ArurHubData.TeamGoalCheckEnabled then
+            ArurHubData.watchCurrentGame()
+        end
+        local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+        if not root then continue end
+        for _, courtName in ipairs(validCourts) do
+            local court = workspace.Courts:FindFirstChild(courtName)
+            if court and court.PrimaryPart and (root.Position - court.PrimaryPart.Position).Magnitude < 20 then
+                task.wait(5)
+                local s = court:FindFirstChild("_CourtSettings")
+                if s and s.Started.Value then
+                    local pLrs = court:FindFirstChild("_CourtPlayers")
+                    if pLrs then
+                        if pLrs.Home1.Value == lp or pLrs.Home2.Value == lp then TeamSide = "Home"
+                        elseif pLrs.Away1.Value == lp or pLrs.Away2.Value == lp then TeamSide = "Away"
+                        else TeamSide = nil end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+library:init_config(window)
+
+notify('ArurHub Fixed!')
+
+-- [ AUTO DUNK CORE LOGIC ] --
+ArurHubData.dunkRemoteCache = {}
+function ArurHubData.updateDunkCache()
+    ArurHubData.dunkRemoteCache = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj.Name == "dunkFunction" and obj.Parent and obj.Parent:IsA("BasePart") then
+            table.insert(ArurHubData.dunkRemoteCache, obj)
+        end
+    end
+end
+ArurHubData.updateDunkCache()
+
+workspace.DescendantAdded:Connect(function(obj)
+    if obj.Name == "dunkFunction" then task.wait(1); ArurHubData.updateDunkCache() end
+end)
+
+-- Data Functions Unified Above
+
+function ArurHubData.findTheBall()
+    local char = lp.Character
+    if not char then return nil end
+    local ballInChar = char:FindFirstChild("Basketball") or char:FindFirstChild("Ball")
+    if ballInChar then
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if obj.Name == "Basketball" and obj ~= char then
+                local p = obj:FindFirstChildOfClass("BasePart") or (obj:IsA("BasePart") and obj)
+                if p and (p.Position - char.HumanoidRootPart.Position).Magnitude < 10 then
+                    return obj 
+                end
+            end
+        end
+        return ballInChar
+    end
+    return nil
+end
+
+task.spawn(function()
+    while task.wait(0.1) do
+        if not ArurHubData.AutoDunkEnabled or ArurHubData.IsDunkingSpam then continue end
+        
+        local char = lp.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then continue end
+
+        local ball = ArurHubData.findTheBall()
+        if not ball then continue end
+
+        local nearestRemote, nearestDist = nil, math.huge
+        local flatPlayer = Vector2.new(root.Position.X, root.Position.Z)
+
+        -- FAST LOOKUP: Iterate ONLY the cached remotes (Usually 2-4 per map)
+        for _, obj in ipairs(ArurHubData.dunkRemoteCache) do
+            local hoopPart = obj.Parent
+            if hoopPart then
+                local flatHoop = Vector2.new(hoopPart.Position.X, hoopPart.Position.Z)
+                local dist = (flatPlayer - flatHoop).Magnitude
+                
+                if dist < nearestDist then
+                    nearestDist = dist
+                    nearestRemote = obj
+                end
+            end
+        end
+
+        if nearestRemote and nearestDist <= 21.0 then
+            ArurHubData.IsDunkingSpam = true
+            task.spawn(function()
+                while ArurHubData.HasBall() and ArurHubData.AutoDunkEnabled do
+                    task.spawn(function()
+                        nearestRemote:InvokeServer(ball)
+                    end)
+                    task.wait(0.05)
+                end
+                task.wait(1.5)
+                ArurHubData.IsDunkingSpam = false
+            end)
+        end
+    end
+end)
+
+-- [ PASS AIMBOT MODULE ] --
+function ArurHubData.isValidTeammate(targetPlayer)
+    if targetPlayer == lp then return false end
+    
+    -- O(1) table lookup from roster cache
+    if ArurHubData.MilleniumRoster[targetPlayer] then
+        return true
+    end
+
+    -- Fallback removed to prevent enemy targeting glitches
+    return false
+end
+
+function ArurHubData.clearAllPassESP()
+    for _, bb in pairs(ArurHubData.PassTargetBillboards) do
+        if bb and bb.Parent then bb:Destroy() end
+    end
+    ArurHubData.PassTargetBillboards = {}
+end
+
+function ArurHubData.setupPassESP(player, num)
+    if not player.Character then return end
+    local head = player.Character:WaitForChild("Head", 5)
+    if not head then return end
+
+    local bb = ArurHubData.PassTargetBillboards[player]
+    if bb and bb.Parent == head then
+        local lbl = bb:FindFirstChild("NumLabel")
+        if lbl then 
+            lbl.Text = tostring(num) 
+            lbl.TextSize = ArurHubData.PassESPSize
+            lbl.TextColor3 = ArurHubData.PassESPColor
+        end
+        return
+    end
+
+    if bb then bb:Destroy() end
+
+    bb = Instance.new("BillboardGui")
+    bb.Name = "ArurHubPassESP"
+    bb.Size = UDim2.new(0, 50, 0, 50)
+    bb.StudsOffset = Vector3.new(0, 5, 0)
+    bb.AlwaysOnTop = true
+    bb.Adornee = head
+    bb.Parent = head
+
+    local label = Instance.new("TextLabel")
+    label.Name = "NumLabel"
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = ArurHubData.PassESPColor
+    label.TextStrokeTransparency = 0
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = ArurHubData.PassESPSize
+    label.Text = tostring(num)
+    label.Parent = bb
+
+    ArurHubData.PassTargetBillboards[player] = bb
+end
+
+function ArurHubData.getValidPassTargets()
+    local valid = {}
+    local myRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return valid end
+
+    for _, p in ipairs(players:GetPlayers()) do
+        if p ~= lp and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            if ArurHubData.isValidTeammate(p) then
+                valid[p] = p.Character.HumanoidRootPart.AssemblyLinearVelocity
+            end
+        end
+    end
+    return valid
+end
+
+run_service.Heartbeat:Connect(function()
+    if not ArurHubData.PassAimbotEnabled or not ArurHubData.HasBall() then
+        ArurHubData.PersistentPassTargets = {}
+        ArurHubData.PersistentTargetVelocities = {}
+        ArurHubData.clearAllPassESP()
+        return
+    end
+
+    local currentValid = ArurHubData.getValidPassTargets()
+    ArurHubData.PersistentTargetVelocities = currentValid
+    
+    for i = 5, 1, -1 do
+        local p = ArurHubData.PersistentPassTargets[i]
+        if p and (not currentValid[p] or p.Parent == nil) then
+            table.remove(ArurHubData.PersistentPassTargets, i)
+            if ArurHubData.PassTargetBillboards[p] then
+                ArurHubData.PassTargetBillboards[p]:Destroy()
+                ArurHubData.PassTargetBillboards[p] = nil
+            end
+        end
+    end
+    
+    for p, vel in pairs(currentValid) do
+        if not table.find(ArurHubData.PersistentPassTargets, p) and #ArurHubData.PersistentPassTargets < 5 then
+            table.insert(ArurHubData.PersistentPassTargets, p)
+        end
+    end
+    
+    for i, p in ipairs(ArurHubData.PersistentPassTargets) do
+        ArurHubData.setupPassESP(p, i)
+    end
+end)
+
+function ArurHubData.triggerAutoPass(targetIndex)
+    if not ArurHubData.PassAimbotEnabled or not ArurHubData.HasBall() then return end
+    
+    local targetPlr = ArurHubData.PersistentPassTargets[targetIndex]
+    if not targetPlr or not targetPlr.Character then return end
+    
+    local targetVel = ArurHubData.PersistentTargetVelocities[targetPlr] or Vector3.zero
+
+    local myChar = lp.Character
+    local myHead = myChar and myChar:FindFirstChild("Head")
+    if not myHead then return end
+
+    local targetHead = targetPlr.Character:FindFirstChild("Head")
+    if not targetHead then return end
+
+    local dist = (targetHead.Position - myHead.Position).Magnitude
+    if dist > 140 then return end
+
+    local travelTime = dist / 90
+    local leadMult = 1.6
+    
+    if dist < 45 then
+        leadMult = 1.7 + ((45 - dist) * 0.08)
+    elseif dist < 55 then
+        leadMult = 1.6 + ((55 - dist) * 0.01)
+    elseif dist > 125 then
+        leadMult = 1.9 - ((dist - 125) * 0.005)
+    elseif dist > 100 then
+        leadMult = 1.65 + ((dist - 100) * 0.01)
+    elseif dist > 95 then
+        leadMult = 1.75 - ((dist - 95) * 0.02)
+    elseif dist > 80 then
+        leadMult = 1.6 + ((dist - 80) * 0.01)
+    end
+
+    local predictionVector = targetVel * travelTime * leadMult * (ArurHubData.PassPredictionStrength or 1)
+    local leadPos = targetHead.Position + predictionVector
+
+    local arcV = 1 
+    if dist >= 80 then
+        arcV = 28 + ((dist - 80) * 1.2)
+    elseif dist >= 65 then
+        arcV = 16 + ((dist - 65) * 0.8)
+    elseif dist < 45 then
+        arcV = ((dist * 8) / 45) - 10
+    else
+        arcV = 1
+    end
+    arcV = math.clamp(arcV, -10, 85)
+
+    local horizVel = Vector2.new(targetVel.X, targetVel.Z)
+    local expectedTargetP = leadPos + Vector3.new(0, arcV, 0)
+    local pPos = myHead.Position
+    local dirVector = (expectedTargetP - pPos).Unit
+    local horizDir = Vector2.new(dirVector.X, dirVector.Z).Unit
+    
+    if horizVel.Magnitude > 2.0 then
+        local dotP = horizVel.Unit:Dot(horizDir)
+        if dotP > 0.4 then
+            local dynamicBoost = 5
+            if dist > 40 then dynamicBoost = 5 + ((dist - 40) * 0.75) end
+            
+            arcV = arcV + dynamicBoost
+            arcV = math.clamp(arcV, -10, 85)
+            expectedTargetP = leadPos + Vector3.new(0, arcV, 0)
+            dirVector = (expectedTargetP - pPos).Unit
+        end
+    end
+
+    local valMap = { 
+        X1 = pPos.X, Y1 = pPos.Y, Z1 = pPos.Z, 
+        X2 = dirVector.X, Y2 = dirVector.Y, Z2 = dirVector.Z 
+    }
+    
+    local finalTable = {}
+    if not _G.ArurHubMapping then return end
+    for _, key in ipairs(_G.ArurHubMapping) do
+        table.insert(finalTable, buffer.fromstring(tostring(valMap[key])))
+    end
+
+    lp:SetAttribute("Power", 85)
+    local shootRem = replicated_storage.Remotes:FindFirstChild("ShootingEvent")
+    if shootRem and _G.ArurHubCode then
+        shootRem:FireServer(85, finalTable, _G.ArurHubCode)
+    end
+end
+
+game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.One then
+        ArurHubData.triggerAutoPass(1)
+    elseif input.KeyCode == Enum.KeyCode.Two then
+        ArurHubData.triggerAutoPass(2)
+    elseif input.KeyCode == Enum.KeyCode.Three then
+        ArurHubData.triggerAutoPass(3)
+    elseif input.KeyCode == Enum.KeyCode.Four then
+        ArurHubData.triggerAutoPass(4)
+    elseif input.KeyCode == Enum.KeyCode.Five then
+        ArurHubData.triggerAutoPass(5)
+    elseif input.KeyCode == Enum.KeyCode.J then
+        task.spawn(ArurHubData.triggerNoJumpShot)
+    end
+end)
+
+-- [ META-ATTRIBUTE SPOOFING REMOVED ] --
+-- Re-enable notifications now that all UI callbacks have fired silently
+task.defer(function()
+    local ok, name = library:load_autoload_config()
+    
+    if getgenv then getgenv().ArurHub_SuppressNotifs = false end
+    ArurHubData.HideNotifications = false
+    
+    if ok and name then
+        ArurHubData.SendNotification('Config Autoloaded: ' .. name, 4, Color3.fromRGB(130, 120, 255))
+    else
+        ArurHubData.SendNotification('ArurHub Loaded!', 4, Color3.fromRGB(130, 120, 255))
+    end
+end)
