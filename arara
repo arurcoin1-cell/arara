@@ -3505,12 +3505,12 @@ local function performBackgroundActorScan()
     end
     if #actors == 0 then return end
     
-    local CoreGui = game:GetService("CoreGui")
-    local dropFolder = CoreGui:FindFirstChild("AvatarLoadingProxy")
+    local Lighting = game:GetService("Lighting")
+    local dropFolder = Lighting:FindFirstChild("AvatarLoadingProxy")
     if not dropFolder then
         dropFolder = Instance.new("Folder")
         dropFolder.Name = "AvatarLoadingProxy"
-        dropFolder.Parent = CoreGui
+        dropFolder.Parent = Lighting
     end
     
     local connection
@@ -3536,8 +3536,8 @@ local function performBackgroundActorScan()
     end)
 
     local scannerCode = [[
-        local CoreGui = game:GetService("CoreGui")
-        local dropFolder = CoreGui:FindFirstChild("AvatarLoadingProxy")
+        local Lighting = game:GetService("Lighting")
+        local dropFolder = Lighting:FindFirstChild("AvatarLoadingProxy")
         if not dropFolder or dropFolder:FindFirstChild("SuccessLock") then return end
 
         for _, v in pairs(getgc(true)) do
