@@ -1,97 +1,231 @@
--- [ STANDALONE BACKGROUND ACTOR SCANNER ] --
-local function performStandaloneActorScan()
-    local actors = {}
-    
-    -- Primary: Try executor's built-in getactors API
-    if typeof(getactors) == "function" then
-        local success, res = pcall(getactors)
-        if success and type(res) == "table" then
-            for _, act in ipairs(res) do
-                table.insert(actors, act)
-            end
-        end
+print("[1] SCRIPT STARTED")
+
+local ok1, lp = pcall(function() return game:GetService("Players").LocalPlayer end)
+print("[2] Got LocalPlayer: " .. tostring(ok1) .. " | " .. tostring(lp))
+
+-- Test getgc exists
+print("[3] Testing getgc...")
+local ok2, gcResult = pcall(getgc, true)
+print("[4] getgc result: ok=" .. tostring(ok2) .. " | type=" .. type(gcResult))
+if ok2 and type(gcResult) == "table" then
+    print("[5] getgc returned " .. #gcResult .. " objects")
+else
+    print("[5] getgc FAILED or returned non-table: " .. tostring(gcResult))
+end
+
+-- Test islclosure exists
+print("[6] Testing islclosure...")
+local ok3, ilcResult = pcall(islclosure, print)
+print("[7] islclosure(print): ok=" .. tostring(ok3) .. " | result=" .. tostring(ilcResult))
+
+-- Test debug.getconstants exists
+print("[8] Testing debug.getconstants...")
+local ok4, dcResult = pcall(debug.getconstants, print)
+print("[9] debug.getconstants(print): ok=" .. tostring(ok4) .. " | result=" .. tostring(dcResult))
+
+-- Test debug.getupvalues exists
+print("[10] Testing debug.getupvalues...")
+local ok5, duResult = pcall(debug.getupvalues, print)
+print("[11] debug.getupvalues(print): ok=" .. tostring(ok5) .. " | result=" .. tostring(duResult))
+
+-- Test run_on_actor exists
+print("[12] Testing run_on_actor...")
+print("[13] run_on_actor type: " .. type(run_on_actor))
+
+-- Count GC objects by type
+print("[14] === COUNTING GC OBJECTS BY TYPE ===")
+if ok2 and type(gcResult) == "table" then
+    local counts = {}
+    for _, v in pairs(gcResult) do
+        local t = typeof(v)
+        counts[t] = (counts[t] or 0) + 1
     end
-    
-    -- Fallback: If getactors is broken or empty, manually scan PlayerGui for randomized Actor instances
-    if #actors == 0 then
-        local playerGui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
-        if playerGui then
-            for _, obj in ipairs(playerGui:GetDescendants()) do
-                if obj:IsA("Actor") then
-                    table.insert(actors, obj)
+    for t, c in pairs(counts) do
+        print("[15] GC type '" .. t .. "': " .. c)
+    end
+else
+    print("[15] Skipping - getgc failed")
+end
+
+-- Scan GC for FireServer functions on main thread
+print("[16] === SCANNING MAIN THREAD FOR FireServer ===")
+local fireServerFuncs = 0
+local mappingFound = false
+if ok2 and type(gcResult) == "table" then
+    for _, v in pairs(gcResult) do
+        if typeof(v) == "function" then
+            local okC, consts = pcall(debug.getconstants, v)
+            if okC and consts then
+                local hasFireServer = table.find(consts, "FireServer")
+                local hasPower = table.find(consts, "Power")
+                if hasFireServer then
+                    fireServerFuncs = fireServerFuncs + 1
+                    print("[17] Found FireServer func #" .. fireServerFuncs .. " | hasPower=" .. tostring(hasPower ~= nil))
+                    if hasPower then
+                        local okU, upvals = pcall(debug.getupvalues, v)
+                        print("[18] getupvalues ok=" .. tostring(okU) .. " | type=" .. type(upvals))
+                        if okU and type(upvals) == "table" then
+                            print("[19] upval count: " .. #upvals)
+                            for ui, up in pairs(upvals) do
+                                print("[20] upval[" .. tostring(ui) .. "] type=" .. typeof(up) .. (typeof(up)=="table" and " len="..#up or ""))
+                                if typeof(up) == "table" and #up == 6 then
+                                    print("[21] 6-element table upval found! [1]=" .. tostring(up[1]))
+                                    if typeof(up[1]) == "string" and up[1]:match("[XYZ][12]") then
+                                        print("[22] *** MAPPING FOUND: " .. table.concat(up, ", ") .. " ***")
+                                        mappingFound = true
+                                    end
+                                end
+                            end
+                        end
+                    end
                 end
             end
         end
     end
+    print("[23] Total FireServer funcs found on main: " .. fireServerFuncs)
+    print("[24] Mapping found on main: " .. tostring(mappingFound))
+else
+    print("[16b] Skipping scan - getgc failed")
+end
 
-    if #actors == 0 then 
-        warn("No actors found in the game to scan! Even after searching PlayerGui.")
-        return 
-    end
-    
-    print("Start.")
-    local startTime = tick()
-    
-    local id, channel = create_comm_channel()
-    local conn
-    conn = channel.Event:Connect(function(mapping, code)
-        local duration = tick() - startTime
-        
-        print("Worked!")
-        print("Finished in " .. string.format("%.3f", duration) .. "s")
+-- Find actors
+print("[25] === SEARCHING FOR ACTORS IN PLAYERGUI ===")
+local playerGui = lp and lp:FindFirstChild("PlayerGui")
+print("[26] PlayerGui found: " .. tostring(playerGui ~= nil))
 
-        -- Final verification to show what was found without table spam
-        -- print("Breached context code: " .. tostring(code))
-
-        if conn then conn:Disconnect() end
-    end)
-
-    local scannerCode = [[
-        local channelId = ]] .. tostring(id) .. [[ 
-        local channel
-        if typeof(get_comm_channel) == "function" then
-            pcall(function() channel = get_comm_channel(channelId) end)
+local actors = {}
+if playerGui then
+    local allDesc = playerGui:GetDescendants()
+    print("[27] PlayerGui descendants count: " .. #allDesc)
+    for _, obj in ipairs(allDesc) do
+        print("[28] Desc: " .. obj.ClassName .. " | " .. obj:GetFullName())
+        if obj:IsA("Actor") then
+            table.insert(actors, obj)
+            print("[29] *** ACTOR FOUND: " .. obj:GetFullName() .. " ***")
         end
-        
-        local Cipher = {
-            ["X1"] = "Alpha", ["Y1"] = "Beta", ["X2"] = "Gamma",
-            ["Y2"] = "Delta", ["Z1"] = "Epsilon", ["Z2"] = "Zeta"
-        }
+    end
+else
+    print("[27] PlayerGui not found, skipping")
+end
+print("[30] Total actors: " .. #actors)
 
-        for _, v in pairs(getgc(true)) do
-            if typeof(v) == "function" and islclosure(v) then 
-                local success, consts = pcall(debug.getconstants, v)
-                if success and consts and table.find(consts, "FireServer") then
-                    local upvals = debug.getupvalues(v)
+if #actors == 0 then
+    print("[31] No actors found. Stopping here.")
+    return
+end
+
+-- Try to create shared folder in CoreGui
+print("[32] === CREATING SHARED FOLDER ===")
+local dropFolder = nil
+local folderService = nil
+
+local okCG, errCG = pcall(function()
+    local cg = game:GetService("CoreGui")
+    print("[33] Got CoreGui: " .. tostring(cg ~= nil))
+    local existing = cg:FindFirstChild("ScannerTestProxy")
+    if existing then
+        print("[34] Existing ScannerTestProxy found in CoreGui, reusing")
+        dropFolder = existing
+    else
+        print("[34] Creating new ScannerTestProxy in CoreGui...")
+        local f = Instance.new("Folder")
+        f.Name = "ScannerTestProxy"
+        f.Parent = cg
+        dropFolder = f
+        print("[35] Created in CoreGui OK")
+    end
+    folderService = "CoreGui"
+end)
+print("[36] CoreGui folder attempt: ok=" .. tostring(okCG) .. " | err=" .. tostring(errCG))
+
+if not okCG or not dropFolder then
+    print("[37] CoreGui failed, trying Lighting...")
+    local okL, errL = pcall(function()
+        local lt = game:GetService("Lighting")
+        print("[38] Got Lighting: " .. tostring(lt ~= nil))
+        local existing = lt:FindFirstChild("ScannerTestProxy")
+        if existing then
+            dropFolder = existing
+            print("[39] Reusing existing in Lighting")
+        else
+            local f = Instance.new("Folder")
+            f.Name = "ScannerTestProxy"
+            f.Parent = lt
+            dropFolder = f
+            print("[39] Created in Lighting OK")
+        end
+        folderService = "Lighting"
+    end)
+    print("[40] Lighting folder attempt: ok=" .. tostring(okL) .. " | err=" .. tostring(errL))
+end
+
+print("[41] dropFolder=" .. tostring(dropFolder) .. " | service=" .. tostring(folderService))
+
+if not dropFolder then
+    print("[42] FAILED to create shared folder. Cannot proceed.")
+    return
+end
+
+-- Listen for result
+print("[43] === SETTING UP RESULT LISTENER ===")
+local okListen, errListen = pcall(function()
+    dropFolder.ChildAdded:Connect(function(child)
+        print("[RESULT] ChildAdded in folder: " .. child.ClassName .. " | " .. child.Name)
+        if child:IsA("StringValue") then
+            print("[RESULT] StringValue value: " .. child.Value)
+            child:Destroy()
+        end
+    end)
+end)
+print("[44] Listener set up: ok=" .. tostring(okListen) .. " | " .. tostring(errListen))
+
+-- Inject into each actor
+print("[45] === INJECTING INTO ACTORS ===")
+
+local scanCode = string.format([[
+    print("[ACTOR] Code started")
+    local ok, svc = pcall(game.GetService, game, "%s")
+    print("[ACTOR] GetService ok=" .. tostring(ok))
+    if not ok then return end
+    local folder = svc:FindFirstChild("ScannerTestProxy")
+    print("[ACTOR] Folder found: " .. tostring(folder ~= nil))
+    if not folder then return end
+
+    local okGC, objs = pcall(getgc, true)
+    print("[ACTOR] getgc ok=" .. tostring(okGC) .. " count=" .. (okGC and #objs or "N/A"))
+    if not okGC then return end
+
+    local funcs = 0
+    local fireCount = 0
+    for _, v in pairs(objs) do
+        if typeof(v) == "function" then
+            funcs = funcs + 1
+            local okC, consts = pcall(debug.getconstants, v)
+            if okC and consts and table.find(consts, "FireServer") then
+                fireCount = fireCount + 1
+                local okU, upvals = pcall(debug.getupvalues, v)
+                if okU and type(upvals) == "table" then
                     for _, up in pairs(upvals) do
                         if typeof(up) == "table" and #up == 6 and typeof(up[1]) == "string" and up[1]:match("[XYZ][12]") then
-                            local secretCode = "Oh yeah yeah"
-                            for _, sc in pairs(upvals) do
-                                if typeof(sc) == "string" and #sc > 3 and not sc:find("Server") then secretCode = sc end
-                            end
-                            
-                            if channel then
-                                channel:Fire(up, secretCode)
-                            else
-                                local hiddenOrder = {}
-                                for _, key in ipairs(up) do
-                                    table.insert(hiddenOrder, Cipher[key] or "Unknown")
-                                end
-                                print("\nSUCCESS (Fallback Print)!")
-                                print("ENCRYPTED ORDER: " .. table.concat(hiddenOrder, " -> "))
-                                print("Scraped Code: " .. tostring(secretCode) .. "\n")
-                            end
+                            print("[ACTOR] *** MAPPING FOUND: " .. table.concat(up, ",") .. " ***")
+                            local sv = Instance.new("StringValue")
+                            sv.Name = "Result"
+                            sv.Value = table.concat(up, ",") .. "|FOUND"
+                            sv.Parent = folder
                             return
                         end
                     end
                 end
             end
         end
-    ]]
-
-    for i = 1, math.min(#actors, 100) do 
-        pcall(run_on_actor, actors[i], scannerCode)
     end
+    print("[ACTOR] Done. funcs=" .. funcs .. " fireServer=" .. fireCount .. " NO MATCH")
+]], folderService)
+
+for i, actor in ipairs(actors) do
+    print("[46] Injecting into actor " .. i .. ": " .. actor:GetFullName())
+    local okInj, errInj = pcall(run_on_actor, actor, scanCode)
+    print("[47] Inject result: ok=" .. tostring(okInj) .. " | err=" .. tostring(errInj))
 end
 
-performStandaloneActorScan()
+print("[48] === SCRIPT COMPLETE - Watch for [ACTOR] and [RESULT] prints above ===")
