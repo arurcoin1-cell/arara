@@ -1,153 +1,69 @@
--- hookmetamethod breach standalone test
--- Run this, then shoot once in-game to calibrate
-print("=== hookmetamethod breach test ===")
+print("starting...")
+task.wait(2)
 
-local lp = game:GetService("Players").LocalPlayer
 local rs = game:GetService("ReplicatedStorage")
+local shootRemote = rs.Remotes.ShootingEvent
+print("remote: " .. tostring(shootRemote ~= nil))
 
--- Find ShootingEvent
-local shootRemote = rs:FindFirstChild("Remotes") and rs.Remotes:FindFirstChild("ShootingEvent")
-print("[1] ShootingEvent: " .. tostring(shootRemote ~= nil))
-if not shootRemote then
-    print("[ERR] ShootingEvent not found. Stopping.")
-    return
-end
+local CoreGui = game:GetService("CoreGui")
+local drop = CoreGui:FindFirstChild("AHTest") or Instance.new("Folder")
+drop.Name = "AHTest"
+drop.Parent = CoreGui
 
--- Check required functions
-print("[2] hookmetamethod: " .. type(hookmetamethod))
-print("[3] getrawmetatable: " .. type(getrawmetatable))
-print("[4] getnamecallmethod: " .. type(getnamecallmethod))
-print("[5] newcclosure: " .. type(newcclosure))
-
-local mt = getrawmetatable(game)
-print("[6] Got metatable: " .. tostring(mt ~= nil))
-
--- Set up the hook
-print("[7] Setting up hook... Shoot once in-game!")
-
-local captured = false
-
-local ok, err = pcall(function()
-    setreadonly(mt, false)
-
-    local old__namecall = mt.__namecall
-    mt.__namecall = newcclosure(function(self, ...)
-        local method = getnamecallmethod()
-
-        -- Only intercept FireServer on our specific remote
-        if method == "FireServer" and self == shootRemote and not captured then
-            captured = true
-            print("")
-            print("=== SHOT INTERCEPTED! ===")
-
-            local args = {...}
-            print("[SHOT] Total args: " .. #args)
-
-            -- Print each arg
-            for i, arg in ipairs(args) do
-                local atype = typeof(arg)
-                if atype == "number" then
-                    print("[SHOT] arg[" .. i .. "] NUMBER = " .. tostring(arg))
-                elseif atype == "string" then
-                    print("[SHOT] arg[" .. i .. "] STRING = '" .. arg .. "'")
-                elseif atype == "table" then
-                    print("[SHOT] arg[" .. i .. "] TABLE len=" .. #arg)
-                    -- Try to decode each element as a buffer
-                    for j, elem in ipairs(arg) do
-                        local etype = typeof(elem)
-                        if etype == "buffer" then
-                            local decoded = buffer.tostring(elem)
-                            local num = tonumber(decoded)
-                            print("[SHOT]   [" .. j .. "] buffer -> '" .. decoded .. "' (num=" .. tostring(num) .. ")")
-                        else
-                            print("[SHOT]   [" .. j .. "] " .. etype .. " = " .. tostring(elem))
-                        end
-                    end
-                elseif atype == "buffer" then
-                    local decoded = buffer.tostring(arg)
-                    print("[SHOT] arg[" .. i .. "] BUFFER -> '" .. decoded .. "'")
-                else
-                    print("[SHOT] arg[" .. i .. "] " .. atype .. " = " .. tostring(arg))
-                end
-            end
-
-            -- Try to decode the mapping
-            -- arg[1] = power, arg[2] = buffer table, arg[3] = code
-            local bufTable = nil
-            local codeStr = nil
-            local powerVal = nil
-
-            for i, arg in ipairs(args) do
-                if typeof(arg) == "number" then
-                    powerVal = arg
-                elseif typeof(arg) == "string" and #arg > 3 then
-                    codeStr = arg
-                elseif typeof(arg) == "table" and #arg == 6 then
-                    -- check if it's a buffer table
-                    if typeof(arg[1]) == "buffer" then
-                        bufTable = arg
-                    end
-                end
-            end
-
-            print("")
-            print("[DECODE] power=" .. tostring(powerVal))
-            print("[DECODE] code='" .. tostring(codeStr) .. "'")
-            print("[DECODE] bufTable found: " .. tostring(bufTable ~= nil))
-
-            if bufTable then
-                -- Decode all 6 values
-                local vals = {}
-                for i, buf in ipairs(bufTable) do
-                    vals[i] = tonumber(buffer.tostring(buf))
-                    print("[DECODE] buf[" .. i .. "] = " .. tostring(vals[i]))
-                end
-
-                -- Get current player position to try to match
-                local char = lp.Character
-                local head = char and char:FindFirstChild("Head")
-                if head then
-                    local pos = head.Position
-                    print("")
-                    print("[DECODE] Player head pos: X=" .. pos.X .. " Y=" .. pos.Y .. " Z=" .. pos.Z)
-                    print("[DECODE] Trying to match values to XYZ components...")
-
-                    local labels = {}
-                    for i, val in ipairs(vals) do
-                        -- Compare to position components with some tolerance
-                        if math.abs(val - pos.X) < 2 then
-                            labels[i] = "X1(pos.X)"
-                        elseif math.abs(val - pos.Y) < 2 then
-                            labels[i] = "Y1(pos.Y)"
-                        elseif math.abs(val - pos.Z) < 2 then
-                            labels[i] = "Z1(pos.Z)"
-                        elseif val >= -1.1 and val <= 1.1 then
-                            labels[i] = "DIR_COMPONENT(X2/Y2/Z2)"
-                        else
-                            labels[i] = "UNKNOWN"
-                        end
-                        print("[DECODE] buf[" .. i .. "] = " .. tostring(val) .. " -> " .. labels[i])
-                    end
-                else
-                    print("[DECODE] Could not get head position for matching")
-                end
-            end
-
-            print("")
-            print("=== CAPTURE COMPLETE - unhooking ===")
-            mt.__namecall = old__namecall
-            setreadonly(mt, true)
-        end
-
-        return old__namecall(self, ...)
-    end)
-
-    setreadonly(mt, true)
+drop.ChildAdded:Connect(function(c)
+    if c:IsA("StringValue") then
+        print("RESULT: " .. c.Value)
+        c:Destroy()
+    end
 end)
 
-print("[8] Hook setup: ok=" .. tostring(ok) .. " err=" .. tostring(err))
-if ok then
-    print("[READY] Hook active! Shoot once in-game now.")
-else
-    print("[FAILED] Could not set up hook.")
+local actors = getactors()
+print("actors: " .. #actors)
+
+local code = [[
+    task.wait(0.5)
+    local rs = game:GetService("ReplicatedStorage")
+    local rem = rs.Remotes.ShootingEvent
+    local drop = game:GetService("CoreGui"):FindFirstChild("AHTest")
+    if not drop then print("[A] no folder") return end
+
+    local captured = false
+    local mt = getrawmetatable(game)
+    setreadonly(mt, false)
+    local old = mt.__namecall
+    mt.__namecall = newcclosure(function(self, ...)
+        if getnamecallmethod() == "FireServer" and self == rem and not captured then
+            captured = true
+            local args = {...}
+            local result = "args=" .. #args
+            for i, a in ipairs(args) do
+                if typeof(a) == "string" then
+                    result = result .. " code='" .. a .. "'"
+                elseif typeof(a) == "table" then
+                    result = result .. " tbl[" .. #a .. "]"
+                    for j, elem in ipairs(a) do
+                        if typeof(elem) == "buffer" then
+                            result = result .. "=" .. tostring(tonumber(buffer.tostring(elem)))
+                        end
+                    end
+                elseif typeof(a) == "number" then
+                    result = result .. " power=" .. a
+                end
+            end
+            local sv = Instance.new("StringValue")
+            sv.Name = "R"
+            sv.Value = result
+            sv.Parent = drop
+            mt.__namecall = old
+            setreadonly(mt, true)
+        end
+        return old(self, ...)
+    end)
+    setreadonly(mt, true)
+    print("[A] hook ready - shoot!")
+]]
+
+for i, actor in ipairs(actors) do
+    pcall(run_on_actor, actor, code)
 end
+print("done - shoot now!")
