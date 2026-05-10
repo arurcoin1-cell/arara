@@ -1,69 +1,83 @@
-print("starting...")
-task.wait(2)
+print("=== ARURHUB PARALLEL MEMORY SCANNER ===")
 
+local actors = getactors()
+print("Found " .. #actors .. " actors.")
+if #actors == 0 then return end
+
+-- Create a shared StringValue in ReplicatedStorage for communication
 local rs = game:GetService("ReplicatedStorage")
-local shootRemote = rs.Remotes.ShootingEvent
-print("remote: " .. tostring(shootRemote ~= nil))
+local sharedVal = rs:FindFirstChild("AH_Mapping_Result")
+if not sharedVal then
+    sharedVal = Instance.new("StringValue")
+    sharedVal.Name = "AH_Mapping_Result"
+    sharedVal.Parent = rs
+end
+sharedVal.Value = ""
 
-local CoreGui = game:GetService("CoreGui")
-local drop = CoreGui:FindFirstChild("AHTest") or Instance.new("Folder")
-drop.Name = "AHTest"
-drop.Parent = CoreGui
-
-drop.ChildAdded:Connect(function(c)
-    if c:IsA("StringValue") then
-        print("RESULT: " .. c.Value)
-        c:Destroy()
+-- Listen for the result from the actors
+sharedVal:GetPropertyChangedSignal("Value"):Connect(function()
+    local val = sharedVal.Value
+    if val ~= "" then
+        print("========================================")
+        print("🚀 MAPPING FOUND VIA PARALLEL GETGC!")
+        print("Result: " .. val)
+        print("========================================")
     end
 end)
 
-local actors = getactors()
-print("actors: " .. #actors)
-
-local code = [[
+-- Inject getgc scanner into the actors
+local scanCode = [[
     task.wait(0.5)
     local rs = game:GetService("ReplicatedStorage")
-    local rem = rs.Remotes.ShootingEvent
-    local drop = game:GetService("CoreGui"):FindFirstChild("AHTest")
-    if not drop then print("[A] no folder") return end
+    local sharedVal = rs:FindFirstChild("AH_Mapping_Result")
+    if not sharedVal then return end
 
-    local captured = false
-    local mt = getrawmetatable(game)
-    setreadonly(mt, false)
-    local old = mt.__namecall
-    mt.__namecall = newcclosure(function(self, ...)
-        if getnamecallmethod() == "FireServer" and self == rem and not captured then
-            captured = true
-            local args = {...}
-            local result = "args=" .. #args
-            for i, a in ipairs(args) do
-                if typeof(a) == "string" then
-                    result = result .. " code='" .. a .. "'"
-                elseif typeof(a) == "table" then
-                    result = result .. " tbl[" .. #a .. "]"
-                    for j, elem in ipairs(a) do
-                        if typeof(elem) == "buffer" then
-                            result = result .. "=" .. tostring(tonumber(buffer.tostring(elem)))
+    -- Helper to verify mapping
+    local function isMappingTable(t)
+        if type(t) ~= "table" then return false end
+        local count = 0
+        for k, v in pairs(t) do
+            count = count + 1
+            if count > 10 then return false end
+        end
+        if count ~= 6 then return false end
+        
+        local matches = 0
+        for i=1, 6 do
+            local val = t[i]
+            if type(val) == "string" and val:match("^[XYZ][12]$") then
+                matches = matches + 1
+            end
+        end
+        return matches == 6
+    end
+
+    -- Run getgc inside the actor's VM
+    local ok, gc = pcall(getgc, true)
+    if ok and type(gc) == "table" then
+        local funcsScanned = 0
+        for _, obj in pairs(gc) do
+            if type(obj) == "function" then
+                funcsScanned = funcsScanned + 1
+                local okU, upvals = pcall(debug.getupvalues, obj)
+                if okU and type(upvals) == "table" then
+                    for _, up in pairs(upvals) do
+                        if isMappingTable(up) then
+                            sharedVal.Value = table.concat(up, ",")
+                            return
                         end
                     end
-                elseif typeof(a) == "number" then
-                    result = result .. " power=" .. a
                 end
             end
-            local sv = Instance.new("StringValue")
-            sv.Name = "R"
-            sv.Value = result
-            sv.Parent = drop
-            mt.__namecall = old
-            setreadonly(mt, true)
         end
-        return old(self, ...)
-    end)
-    setreadonly(mt, true)
-    print("[A] hook ready - shoot!")
+        print("[Actor] Scanned " .. funcsScanned .. " functions but didn't find mapping.")
+    else
+        print("[Actor] getgc failed or restricted inside actor.")
+    end
 ]]
 
 for i, actor in ipairs(actors) do
-    pcall(run_on_actor, actor, code)
+    pcall(run_on_actor, actor, scanCode)
 end
-print("done - shoot now!")
+
+print("Scanning parallel VMs... wait a moment.")
