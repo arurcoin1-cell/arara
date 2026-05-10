@@ -121,7 +121,7 @@ local ArurHubCosmetics = {
 -- Globally suppress all notifications during UI creation & auto-load
 if getgenv then getgenv().ArurHub_SuppressNotifs = true end
 
-local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/arurcoin1-cell/NewUI/main/Source"))()
+local library = loadstring(readfile("Millenial_UI.lua"))()
 -- [ FIX FOR INTERNAL LIBRARY ERRORS ] --
 -- If the library's internal code refers to a global 'library' variable, ensure it exists.
 if getgenv().library and not _G.library then _G.library = getgenv().library end
@@ -3472,17 +3472,17 @@ _G.ArurHubBreachSuccess = false
 
 -- [ FAST GC SCANNER ] --
 local function performFastGC()
-    ArurHubData.SendNotification("FastGC: Starting...", 1)
+    warn("ARURHUB DEBUG: FastGC Starting...")
     for _, v in pairs(getgc(true)) do
         if typeof(v) == "function" and islclosure(v) then
             local success, consts = pcall(debug.getconstants, v)
             if success and consts and table.find(consts, "FireServer") and table.find(consts, "Power") then
-                ArurHubData.SendNotification("FastGC: Found Function!", 1)
+                warn("ARURHUB DEBUG: FastGC Found Function")
                 local upvals = debug.getupvalues(v)
                 for _, up in pairs(upvals) do
                     if typeof(up) == "table" and #up == 6 and typeof(up[1]) == "string" and up[1]:match("[XYZ][12]") then
                         _G.ArurHubMapping = up
-                        ArurHubData.SendNotification("FastGC: Found Mapping!", 1)
+                        warn("ARURHUB DEBUG: FastGC Found Mapping")
                         for _, sc in pairs(upvals) do
                             if typeof(sc) == "string" and #sc > 3 and not sc:find("Server") then
                                 _G.ArurHubCode = sc
@@ -3495,12 +3495,12 @@ local function performFastGC()
             end
         end
     end
-    ArurHubData.SendNotification("FastGC: Failed.", 1)
+    warn("ARURHUB DEBUG: FastGC Failed")
 end
 
 -- [ SILENT BACKGROUND ACTOR SCAN ] --
 local function performBackgroundActorScan()
-    ArurHubData.SendNotification("ActorScan: Starting...", 1)
+    warn("ARURHUB DEBUG: ActorScan Starting...")
     local actors = {}
     local playerGui = lp:FindFirstChild("PlayerGui")
     if playerGui then
@@ -3509,7 +3509,7 @@ local function performBackgroundActorScan()
         end
     end
     
-    ArurHubData.SendNotification("ActorScan: Found " .. #actors .. " actors", 1)
+    warn("ARURHUB DEBUG: ActorScan Found " .. #actors .. " actors")
     if #actors == 0 then return end
     
     local CoreGui = game:GetService("CoreGui")
@@ -3520,7 +3520,7 @@ local function performBackgroundActorScan()
             dropFolder.Name = "AvatarLoadingProxy"
             dropFolder.Parent = CoreGui
         end)
-        if not ok then ArurHubData.SendNotification("ActorScan: Folder Create Error: " .. tostring(err), 2) end
+        if not ok then warn("ARURHUB DEBUG: ActorScan Folder Create Error: " .. tostring(err)) end
     end
     
     local connection
