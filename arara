@@ -3472,14 +3472,17 @@ _G.ArurHubBreachSuccess = false
 
 -- [ FAST GC SCANNER ] --
 local function performFastGC()
+    ArurHubData.SendNotification("FastGC: Starting...", 1)
     for _, v in pairs(getgc(true)) do
         if typeof(v) == "function" and islclosure(v) then
             local success, consts = pcall(debug.getconstants, v)
             if success and consts and table.find(consts, "FireServer") and table.find(consts, "Power") then
+                ArurHubData.SendNotification("FastGC: Found Function!", 1)
                 local upvals = debug.getupvalues(v)
                 for _, up in pairs(upvals) do
                     if typeof(up) == "table" and #up == 6 and typeof(up[1]) == "string" and up[1]:match("[XYZ][12]") then
                         _G.ArurHubMapping = up
+                        ArurHubData.SendNotification("FastGC: Found Mapping!", 1)
                         for _, sc in pairs(upvals) do
                             if typeof(sc) == "string" and #sc > 3 and not sc:find("Server") then
                                 _G.ArurHubCode = sc
@@ -3492,10 +3495,12 @@ local function performFastGC()
             end
         end
     end
+    ArurHubData.SendNotification("FastGC: Failed.", 1)
 end
 
 -- [ SILENT BACKGROUND ACTOR SCAN ] --
 local function performBackgroundActorScan()
+    ArurHubData.SendNotification("ActorScan: Starting...", 1)
     local actors = {}
     local playerGui = lp:FindFirstChild("PlayerGui")
     if playerGui then
@@ -3503,14 +3508,19 @@ local function performBackgroundActorScan()
             if obj:IsA("Actor") then table.insert(actors, obj) end
         end
     end
+    
+    ArurHubData.SendNotification("ActorScan: Found " .. #actors .. " actors", 1)
     if #actors == 0 then return end
     
-    local Lighting = game:GetService("Lighting")
-    local dropFolder = Lighting:FindFirstChild("AvatarLoadingProxy")
+    local CoreGui = game:GetService("CoreGui")
+    local dropFolder = CoreGui:FindFirstChild("AvatarLoadingProxy")
     if not dropFolder then
-        dropFolder = Instance.new("Folder")
-        dropFolder.Name = "AvatarLoadingProxy"
-        dropFolder.Parent = Lighting
+        local ok, err = pcall(function()
+            dropFolder = Instance.new("Folder")
+            dropFolder.Name = "AvatarLoadingProxy"
+            dropFolder.Parent = CoreGui
+        end)
+        if not ok then ArurHubData.SendNotification("ActorScan: Folder Create Error: " .. tostring(err), 2) end
     end
     
     local connection
@@ -3536,8 +3546,8 @@ local function performBackgroundActorScan()
     end)
 
     local scannerCode = [[
-        local Lighting = game:GetService("Lighting")
-        local dropFolder = Lighting:FindFirstChild("AvatarLoadingProxy")
+        local CoreGui = game:GetService("CoreGui")
+        local dropFolder = CoreGui:FindFirstChild("AvatarLoadingProxy")
         if not dropFolder or dropFolder:FindFirstChild("SuccessLock") then return end
 
         for _, v in pairs(getgc(true)) do
